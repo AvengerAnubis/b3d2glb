@@ -1,4 +1,5 @@
-use b3d::{B3D, Node};
+pub use b3d::B3D;
+use b3d::Node;
 use crate::math::Mat4;
 use crate::math;
 
