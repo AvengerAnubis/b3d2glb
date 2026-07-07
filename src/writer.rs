@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::b3d::{AnimClip, JointInfo, MeshData, compute_world_matrices};
 use crate::b3d_parser::{Brush, Texture};
 use crate::math::{mat4_inverse, swap_yz_pos, swap_yz_quat, quat_to_gltf, root_pos, root_quat};
-use crate::texture::{load_texture, texture_stem};
+use crate::texture::load_texture;
 
 use serde_json::{json, Value};
 
@@ -432,8 +432,7 @@ fn build_materials(
 
         let mat_val = if let Some(tex) = tex_ref {
             let raw = tex.file.trim_start_matches(".\\").trim_start_matches("./");
-            let tex_name = texture_stem(raw);
-            let png_bytes = load_texture(tex_name, game_dir, tex_cache);
+            let png_bytes = load_texture(raw, game_dir, tex_cache);
 
             if let Some(bytes) = png_bytes {
                 let tex_idx = image_infos.len();
