@@ -190,60 +190,11 @@ fn build_gltf_inner(
     let (gltf_nodes, scene_nodes) = build_node_hierarchy(joints, has_skin);
 
     // --- skin (IBM) --------------------------------------------------------
-    let skins: Vec<Value> = if has_skin {
-        let world_matrices = compute_world_matrices(joints);
-        let ibm_off = bin.len();
-        for world in &world_matrices {
-            let inv = mat4_inverse(world);
-            for col in 0..4 {
-                bin.extend_from_slice(&inv[0][col].to_le_bytes());
-                bin.extend_from_slice(&inv[1][col].to_le_bytes());
-                bin.extend_from_slice(&inv[2][col].to_le_bytes());
-                bin.extend_from_slice(&inv[3][col].to_le_bytes());
-            }
-        }
-        pad_to_4_in_place(&mut bin);
-
-        let ibm_bv = bvs.len() as u32;
-        bvs.push(make_bv(0, ibm_off, (joints.len() * 64) as u32, 0, 34962));
-
-        let ibm_acc = accs.len() as u32;
-        accs.push(json!({
-            "bufferView": ibm_bv, "componentType": 5126,
-            "count": joints.len() as u32, "type": "MAT4",
-        }));
-
-        // Nodes 0..n-1 = bones (matches build_node_hierarchy ordering).
-        let joint_ids: Vec<u32> = (0..joints.len() as u32).collect();
-        vec![json!({
-            "inverseBindMatrices": ibm_acc,
-            "joints": joint_ids,
-        })]
-    } else {
-        vec![]
-    };
+    let skins = build_skin_data(joints, has_skin, &mut bvs, &mut accs, &mut bin);
 
     // --- primitives --------------------------------------------------------
-    let mut primitives = Vec::new();
-    for (i, tg) in mesh.tri_groups.iter().enumerate() {
-        let mat = brush_to_mat.get(&tg.brush_id).copied().unwrap_or(fallback_mat);
-        let mut prim = json!({
-            "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
-            "indices": base_idx_acc + i as u32,
-            "material": mat,
-        });
-
-        if let (Some(ja), Some(wa)) = (joints_acc, weights_acc) {
-            if let Some(attrs) = prim.pointer_mut("/attributes").and_then(|v| v.as_object_mut()) {
-                attrs.insert("JOINTS_0".into(), json!(ja));
-                attrs.insert("WEIGHTS_0".into(), json!(wa));
-            }
-        }
-
-        primitives.push(prim);
-    }
-
-    let meshes = vec![json!({"primitives": primitives})];
+    let meshes = build_primitives(mesh, &brush_to_mat, fallback_mat,
+        base_idx_acc, joints_acc, weights_acc);
 
     // --- animations --------------------------------------------------------
     let anim_acc_offset = accs.len() as u32;
@@ -565,6 +516,84 @@ fn build_node_hierarchy(joints: &[JointInfo], has_skin: bool) -> (Vec<Value>, Ve
 
     let scene_nodes = vec![root_idx];
     (gltf_nodes, scene_nodes)
+}
+
+// ---------------------------------------------------------------------------
+// Skin / IBM
+// ---------------------------------------------------------------------------
+
+/// Build glTF skin data: inverse bind matrices, buffer view, accessor, JSON.
+fn build_skin_data(
+    joints: &[JointInfo],
+    has_skin: bool,
+    bvs: &mut Vec<Value>,
+    accs: &mut Vec<Value>,
+    bin: &mut Vec<u8>,
+) -> Vec<Value> {
+    if !has_skin {
+        return vec![];
+    }
+    let world_matrices = compute_world_matrices(joints);
+    let ibm_off = bin.len();
+    for world in &world_matrices {
+        let inv = mat4_inverse(world);
+        for col in 0..4 {
+            bin.extend_from_slice(&inv[0][col].to_le_bytes());
+            bin.extend_from_slice(&inv[1][col].to_le_bytes());
+            bin.extend_from_slice(&inv[2][col].to_le_bytes());
+            bin.extend_from_slice(&inv[3][col].to_le_bytes());
+        }
+    }
+    pad_to_4_in_place(bin);
+
+    let ibm_bv = bvs.len() as u32;
+    bvs.push(make_bv(0, ibm_off, (joints.len() * 64) as u32, 0, 34962));
+
+    let ibm_acc = accs.len() as u32;
+    accs.push(json!({
+        "bufferView": ibm_bv, "componentType": 5126,
+        "count": joints.len() as u32, "type": "MAT4",
+    }));
+
+    let joint_ids: Vec<u32> = (0..joints.len() as u32).collect();
+    vec![json!({
+        "inverseBindMatrices": ibm_acc,
+        "joints": joint_ids,
+    })]
+}
+
+// ---------------------------------------------------------------------------
+// Primitives
+// ---------------------------------------------------------------------------
+
+/// Build glTF mesh primitives from triangle groups.
+fn build_primitives(
+    mesh: &MeshData,
+    brush_to_mat: &HashMap<u32, usize>,
+    fallback_mat: usize,
+    base_idx_acc: u32,
+    joints_acc: Option<u32>,
+    weights_acc: Option<u32>,
+) -> Vec<Value> {
+    let mut primitives = Vec::new();
+    for (i, tg) in mesh.tri_groups.iter().enumerate() {
+        let mat = brush_to_mat.get(&tg.brush_id).copied().unwrap_or(fallback_mat);
+        let mut prim = json!({
+            "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+            "indices": base_idx_acc + i as u32,
+            "material": mat,
+        });
+
+        if let (Some(ja), Some(wa)) = (joints_acc, weights_acc) {
+            if let Some(attrs) = prim.pointer_mut("/attributes").and_then(|v| v.as_object_mut()) {
+                attrs.insert("JOINTS_0".into(), json!(ja));
+                attrs.insert("WEIGHTS_0".into(), json!(wa));
+            }
+        }
+
+        primitives.push(prim);
+    }
+    vec![json!({"primitives": primitives})]
 }
 
 // ---------------------------------------------------------------------------
