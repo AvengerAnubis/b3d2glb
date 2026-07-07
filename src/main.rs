@@ -118,14 +118,14 @@ fn convert_one(
     let model_name = in_path.file_stem().unwrap_or_default().to_str().unwrap_or("model");
 
     let mut joints = Vec::new();
-    let mut vertex_joint: Vec<Option<usize>> = vec![None; vcount];
-    b3d::collect_joints(&b3d_parsed.node, None, &mut joints, &mut vertex_joint, vcount);
+    let mut vertex_joint: Vec<Option<(usize, f32)>> = vec![None; vcount];
+    b3d::collect_joints(&b3d_parsed.node, None, &mut joints, &mut vertex_joint, vcount, true);
 
     let mut mesh = b3d::collect_mesh(&b3d_parsed);
     for (vi, j) in vertex_joint.iter().enumerate() {
-        mesh.skin[vi] = j.map(|j_idx| b3d::BoneWeight {
-            joint_idx: j_idx as u32,
-            weight: 1.0,
+        mesh.skin[vi] = j.as_ref().map(|(ji, w)| b3d::BoneWeight {
+            joint_idx: *ji as u32,
+            weight: *w,
         });
     }
 

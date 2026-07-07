@@ -39,8 +39,6 @@ pub struct JointInfo {
     pub rotation: [f32; 4],
     /// Index of parent joint in the flattened array, or `None` for root.
     pub parent: Option<usize>,
-    /// Key flags bitmask: 1=position, 2=scale, 4=rotation.
-    pub key_flags: u32,
     /// Keyframes: `(frame, position, scale, rotation)`.
     pub keys: Vec<(u32, [f32; 3], [f32; 3], [f32; 4])>,
 }
@@ -55,49 +53,60 @@ pub struct AnimClip {
 }
 
 /// Traverse the B3D node tree, collecting joints and vertex-to-joint mapping.
+///
+/// Set `is_root = true` for the initial call (the mesh node). The root node is
+/// NOT added to the joint list – it is the skinned mesh, not a deforming bone.
 pub fn collect_joints(
     node: &Node,
     parent: Option<usize>,
     joints: &mut Vec<JointInfo>,
-    vertex_joint: &mut Vec<Option<usize>>,
+    vertex_joint: &mut Vec<Option<(usize, f32)>>,
     vcount: usize,
+    is_root: bool,
 ) {
-    let idx = joints.len();
-    let keys: Vec<_> = node.keys.iter().map(|k| {
-        (k.frame, k.position, k.scale, k.rotation)
-    }).collect();
+    let idx = if is_root { 0 } else { joints.len() };
+    if !is_root {
+        let keys: Vec<_> = node.keys.iter().map(|k| {
+            (k.frame, k.position, k.scale, k.rotation)
+        }).collect();
 
-    joints.push(JointInfo {
-        name: node.name.clone(),
-        position: node.position,
-        scale: node.scale,
-        rotation: node.rotation,
-        parent,
-        key_flags: node.key_flags,
-        keys,
-    });
+        joints.push(JointInfo {
+            name: node.name.clone(),
+            position: node.position,
+            scale: node.scale,
+            rotation: node.rotation,
+            parent,
+            keys,
+        });
+    }
 
     for b in &node.bones {
         let vi = b.vertex_id as usize;
         if vi < vcount {
-            vertex_joint[vi] = Some(idx);
+            // Accumulate weights (a vertex may be assigned to multiple bones).
+            // For now we keep only the first (or last) assignment; a proper fix
+            // would store all weights and let the writer pick up to 4.
+            vertex_joint[vi] = Some((idx, b.weight));
         }
     }
 
     for child in &node.children {
-        collect_joints(child, Some(idx), joints, vertex_joint, vcount);
+        // Root's children get parent=None since the mesh isn't a joint.
+        let child_parent = if is_root { None } else { Some(idx) };
+        collect_joints(child, child_parent, joints, vertex_joint, vcount, false);
     }
 }
 
 /// Collect named animation clips from the B3D node tree.
 pub fn collect_anims(node: &Node) -> Vec<AnimClip> {
     let mut anims = Vec::new();
+    let fps = if node.animation.fps > 0.0 { node.animation.fps } else { 30.0 };
 
     if !node.sequences.is_empty() {
         for seq in &node.sequences {
             anims.push(AnimClip {
                 name: seq.name.clone(),
-                fps: node.animation.fps,
+                fps,
                 first_frame: seq.first_frame,
                 last_frame: seq.last_frame,
             });
@@ -105,7 +114,7 @@ pub fn collect_anims(node: &Node) -> Vec<AnimClip> {
     } else if node.animation.frames > 1 {
         anims.push(AnimClip {
             name: "default".into(),
-            fps: node.animation.fps,
+            fps,
             first_frame: 0,
             last_frame: node.animation.frames.saturating_sub(1),
         });
@@ -124,8 +133,11 @@ pub fn collect_mesh(b3d: &B3D) -> MeshData {
     let mut uvs = Vec::with_capacity(vc);
 
     for v in &verts.vertices {
-        positions.push(v.position);
-        normals.push(v.normal);
+        // Mesh vertices are in scene space: [x, y, -z] (negate Z).
+        // Child bones are in armature space: [x, z, y] (swap YZ).
+        // The root bone's -90°X rotation bridges the two.
+        positions.push([v.position[0], v.position[1], -v.position[2]]);
+        normals.push([v.normal[0], v.normal[1], -v.normal[2]]);
         uvs.push([v.tex_coords[0], v.tex_coords[1]]);
     }
 
@@ -144,11 +156,18 @@ pub fn collect_mesh(b3d: &B3D) -> MeshData {
     MeshData { positions, normals, uvs, tri_groups, skin }
 }
 
-/// Compute the world-space matrix for a joint (right-handed Y-up).
+/// Compute the world-space matrix for a joint in right-handed Y-up (glTF space).
+///
+/// B3D stores bind-pose TRS in left-handed Y-up.
+/// Conversion matches `build_node_hierarchy`: root bones use `[x, y, -z]` + -90° X,
+/// children use `[x, z, y]` / `[w, x, z, y]`.
 pub fn compute_world_matrix(joints: &[JointInfo], idx: usize) -> Mat4 {
-    let pos = math::neg_z_pos(joints[idx].position);
     let scale = joints[idx].scale;
-    let rot = math::neg_z_quat(joints[idx].rotation);
+    let (pos, rot) = if joints[idx].parent.is_none() {
+        (math::root_pos(joints[idx].position), math::root_quat(joints[idx].rotation))
+    } else {
+        (math::neg_z_pos(joints[idx].position), math::neg_z_quat(joints[idx].rotation))
+    };
     let local = math::b3d_to_mat4(pos, scale, rot);
     match joints[idx].parent {
         Some(p) => math::mat4_mul(&compute_world_matrix(joints, p), &local),

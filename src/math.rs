@@ -1,17 +1,50 @@
 /// Row-major 4×4 matrix: `m[row][col]`.
+/// Standard convention: translation in column 3 (`m[0..2][3]`),
+/// homogeneous row in row 3 (`m[3][0..3] = [0,0,0,1]`).
 pub type Mat4 = [[f32; 4]; 4];
 
-/// Convert a B3D position `[x, y, z]` (left-handed Y-up) to right-handed Y-up
-/// by negating Z.
+/// Convert a B3D position `[x, y, z]` (forward = -Z) to glTF (forward = +Y)
+/// by swapping the Y and Z axes.
 pub fn neg_z_pos(p: [f32; 3]) -> [f32; 3] {
+    [p[0], p[2], p[1]]
+}
+
+/// Root-bone position: negate Z instead of swapping YZ.
+/// B3D root bone position → glTF: [x, y, -z].
+pub fn root_pos(p: [f32; 3]) -> [f32; 3] {
     [p[0], p[1], -p[2]]
 }
 
 /// Convert a B3D quaternion `[w, x, y, z]` (left-handed Y-up) to right-handed
-/// Y-up by negating the Z component of the rotation axis.
+/// Y-up by swapping the Y/Z components of the rotation axis.
 /// Result is still `[w, x, y, z]`; call sites reorder to glTF's `[x, y, z, w]`.
 pub fn neg_z_quat(q: [f32; 4]) -> [f32; 4] {
-    [q[0], q[1], q[2], -q[3]]
+    [q[0], q[1], q[3], q[2]]
+}
+
+/// Root-bone rotation: apply -90° X to the converted quaternion.
+/// q = q(-90° X) * neg_z_quat(q_b3d)
+pub fn root_quat(q: [f32; 4]) -> [f32; 4] {
+    let q_conv = neg_z_quat(q);
+    // q(-90° X) = [cos(-45°), sin(-45°), 0, 0] = [0.7071, -0.7071, 0, 0]
+    let q_rot = [0.70710677, -0.70710677, 0.0, 0.0];
+    quat_mul(&q_rot, &q_conv)
+}
+
+/// Convert internal `[w, x, z, y]` to glTF storage order `[x, z, y, w]`.
+pub fn quat_to_gltf(q: [f32; 4]) -> [f32; 4] {
+    [q[1], q[2], q[3], q[0]]
+}
+/// Both inputs and output are `[w, x, y, z]`.
+pub fn quat_mul(a: &[f32; 4], b: &[f32; 4]) -> [f32; 4] {
+    let (w1, x1, y1, z1) = (a[0], a[1], a[2], a[3]);
+    let (w2, x2, y2, z2) = (b[0], b[1], b[2], b[3]);
+    [
+        w1*w2 - x1*x2 - y1*y2 - z1*z2,
+        w1*x2 + x1*w2 + y1*z2 - z1*y2,
+        w1*y2 - x1*z2 + y1*w2 + z1*x2,
+        w1*z2 + x1*y2 - y1*x2 + z1*w2,
+    ]
 }
 
 /// Build a row-major TRS matrix from B3D bind-pose data.
@@ -19,7 +52,7 @@ pub fn neg_z_quat(q: [f32; 4]) -> [f32; 4] {
 /// `pos` and `rot` should already be converted to right-handed Y-up
 /// (via `neg_z_pos` / `neg_z_quat`).
 ///
-/// Row-major convention: `m[row][col]`, translation in `m[3][0..2]`.
+/// Row-major convention: `m[row][col]`, translation in `m[0..2][3]`.
 pub fn b3d_to_mat4(pos: [f32; 3], scale: [f32; 3], rot: [f32; 4]) -> Mat4 {
     let (x, y, z, w) = (rot[1], rot[2], rot[3], rot[0]);
     let xx = x * x; let yy = y * y; let zz = z * z;
@@ -31,21 +64,21 @@ pub fn b3d_to_mat4(pos: [f32; 3], scale: [f32; 3], rot: [f32; 4]) -> Mat4 {
     m[0][0] = (1.0 - 2.0 * (yy + zz)) * scale[0];
     m[0][1] = 2.0 * (xy + wz) * scale[1];
     m[0][2] = 2.0 * (xz - wy) * scale[2];
-    m[0][3] = 0.0;
+    m[0][3] = pos[0];
 
     m[1][0] = 2.0 * (xy - wz) * scale[0];
     m[1][1] = (1.0 - 2.0 * (xx + zz)) * scale[1];
     m[1][2] = 2.0 * (yz + wx) * scale[2];
-    m[1][3] = 0.0;
+    m[1][3] = pos[1];
 
     m[2][0] = 2.0 * (xz + wy) * scale[0];
     m[2][1] = 2.0 * (yz - wx) * scale[1];
     m[2][2] = (1.0 - 2.0 * (xx + yy)) * scale[2];
-    m[2][3] = 0.0;
+    m[2][3] = pos[2];
 
-    m[3][0] = pos[0];
-    m[3][1] = pos[1];
-    m[3][2] = pos[2];
+    m[3][0] = 0.0;
+    m[3][1] = 0.0;
+    m[3][2] = 0.0;
     m[3][3] = 1.0;
 
     m

@@ -116,8 +116,6 @@ dependencies = [
 [[package]]
 name = "b3d"
 version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7800321bd846f66875c4f5d075fe31db896129b0a8f0df10906fd47c6cb4bc5a"
 dependencies = [
  "byteorder",
  "thiserror 1.0.69",

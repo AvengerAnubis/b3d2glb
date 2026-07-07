@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2024"
 
 [dependencies]
-b3d = "0.1.9"
+b3d = { path = "vendor/b3d/b3d" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = "0.25"

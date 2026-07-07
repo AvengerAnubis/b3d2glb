@@ -2,6 +2,25 @@
 
 Convert Blitz3D `.b3d` models to glTF 2.0 (`.glb` or `.gltf` + `.bin` + textures).
 
+## Features
+
+- **Mesh** — vertices, normals, UVs, triangle strips → indexed geometry
+- **Textures** — automatic lookup/conversion (BMP/JPG/PNG/TGA → PNG)
+- **Materials** — per-face brush materials with diffuse colour + texture
+- **Skinning** — B3D BONE chunks → glTF skin with inverse bind matrices (column-major IBM)
+- **Skeletal animation** — B3D KEYS chunks → glTF animation channels with LINEAR interpolation
+  - Absolute keyframe rotations (right-handed Y-up, `[x,y,z,w]` for glTF)
+  - Position/rotation/scale channels per `key_flags` bitmask
+  - Named clips from B3D SEQS chunks, or fallback "default" clip over all frames
+  - FPS defaults to 30.0 when the file stores 0
+
+## Coordinate conversion
+
+B3D is left-handed Y-up; glTF is right-handed Y-up. The converter:
+- Negates Z on positions and normals
+- Negates the Z component of quaternion rotation axes (`neg_z_quat`)
+- Leaves scale unchanged
+
 ## Usage
 
 ```text

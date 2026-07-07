@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::b3d::{AnimClip, JointInfo, MeshData, compute_world_matrix};
-use crate::math::{mat4_inverse, neg_z_pos, neg_z_quat};
+use crate::math::{mat4_inverse, neg_z_pos, neg_z_quat, quat_to_gltf, root_pos, root_quat};
 use crate::texture::{load_texture, texture_stem};
 
 use serde_json::{json, Value};
@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 // Public entry points
 // ---------------------------------------------------------------------------
 
-/// Write a binary .glb file with all data embedded.
+/// Write a binary .glb file with all data embedded (JSON + binary buffer).
 pub fn write_glb(
     mesh: &MeshData,
     joints: &[JointInfo],
@@ -212,11 +212,11 @@ fn build_gltf_inner(
             "count": joints.len() as u32, "type": "MAT4",
         }));
 
+        // Nodes 0..n-1 = bones (matches build_node_hierarchy ordering).
         let joint_ids: Vec<u32> = (0..joints.len() as u32).collect();
         vec![json!({
             "inverseBindMatrices": ibm_acc,
             "joints": joint_ids,
-            "skeleton": 0,
         })]
     } else {
         vec![]
@@ -310,10 +310,9 @@ fn pad_to_4_in_place(data: &mut Vec<u8>) {
 fn push_positions(bin: &mut Vec<u8>, positions: &[[f32; 3]]) -> usize {
     let off = bin.len();
     for p in positions {
-        let c = neg_z_pos(*p);
-        bin.extend_from_slice(&c[0].to_le_bytes());
-        bin.extend_from_slice(&c[1].to_le_bytes());
-        bin.extend_from_slice(&c[2].to_le_bytes());
+        bin.extend_from_slice(&p[0].to_le_bytes());
+        bin.extend_from_slice(&p[1].to_le_bytes());
+        bin.extend_from_slice(&p[2].to_le_bytes());
     }
     off
 }
@@ -321,10 +320,9 @@ fn push_positions(bin: &mut Vec<u8>, positions: &[[f32; 3]]) -> usize {
 fn push_normals(bin: &mut Vec<u8>, normals: &[[f32; 3]]) -> usize {
     let off = bin.len();
     for n in normals {
-        let c = neg_z_pos(*n);
-        bin.extend_from_slice(&c[0].to_le_bytes());
-        bin.extend_from_slice(&c[1].to_le_bytes());
-        bin.extend_from_slice(&c[2].to_le_bytes());
+        bin.extend_from_slice(&n[0].to_le_bytes());
+        bin.extend_from_slice(&n[1].to_le_bytes());
+        bin.extend_from_slice(&n[2].to_le_bytes());
     }
     off
 }
@@ -510,47 +508,62 @@ fn build_materials(
 // Nodes & scene
 // ---------------------------------------------------------------------------
 
+/// Build the glTF node hierarchy from B3D joints.
+///
+/// Each node stores the **bind-pose (rest) transform** in right-handed Y-up.
+/// Animation channels (from `build_animations`) override these values per frame
+/// via glTF's dispatch mechanism — at frame 0 the animation value equals the
+/// bind pose, so the character appears at rest.
 fn build_node_hierarchy(joints: &[JointInfo], has_skin: bool) -> (Vec<Value>, Vec<u32>) {
-    if joints.is_empty() {
-        return (vec![json!({"mesh": 0, "name": "root"})], vec![0]);
-    }
+    // Match IDEAL node ordering: bones at 0..N-1, armature at N, ROOT at N+1.
+    let n = joints.len();           // bone count
+    let armature_idx = n as u32;    // armature slot
+    let root_idx = (n + 1) as u32;  // ROOT slot
 
-    let mut gltf_nodes: Vec<Value> = Vec::new();
-    for (i, j) in joints.iter().enumerate() {
-        let pos = neg_z_pos(j.position);
-        let rot = neg_z_quat(j.rotation);
-        let scl = j.scale;
-
-        let mut node = json!({
-            "name": j.name,
-            "translation": [pos[0], pos[1], pos[2]],
-            "rotation": [rot[1], rot[2], rot[3], rot[0]],
-            "scale": [scl[0], scl[1], scl[2]],
-        });
-
-        if i == 0 {
-            node["mesh"] = json!(0);
-            if has_skin {
-                node["skin"] = json!(0);
-            }
-        }
+    // Step 1: bone nodes (indices 0..n-1).
+    let mut gltf_nodes: Vec<Value> = joints.iter().enumerate().map(|(i, j)| {
+        let (pos, rot_wxyz) = if j.parent.is_none() {
+            (root_pos(j.position), root_quat(j.rotation))
+        } else {
+            (neg_z_pos(j.position), neg_z_quat(j.rotation))
+        };
 
         let children: Vec<u32> = (0..joints.len())
             .filter(|&c| joints[c].parent == Some(i))
             .map(|c| c as u32)
             .collect();
+
+        let mut node = json!({
+            "name": j.name,
+            "translation": [pos[0], pos[1], pos[2]],
+            "rotation": quat_to_gltf(rot_wxyz),
+        });
         if !children.is_empty() {
             node["children"] = json!(children);
         }
+        node
+    }).collect();
 
-        gltf_nodes.push(node);
-    }
-
-    let scene_nodes: Vec<u32> = (0..joints.len())
+    // Step 2: armature node (index n).
+    let root_children: Vec<u32> = (0..joints.len())
         .filter(|&i| joints[i].parent.is_none())
         .map(|i| i as u32)
         .collect();
 
+    let mut armature = json!({"name": "armature"});
+    if !root_children.is_empty() {
+        armature["children"] = json!(root_children);
+    }
+    gltf_nodes.push(armature);
+
+    // Step 3: ROOT node (index n+1) with mesh + skin.
+    let mut root = json!({"name": "ROOT", "mesh": 0, "children": [armature_idx]});
+    if has_skin {
+        root["skin"] = json!(0);
+    }
+    gltf_nodes.push(root);
+
+    let scene_nodes = vec![root_idx];
     (gltf_nodes, scene_nodes)
 }
 
@@ -577,86 +590,137 @@ fn build_animations(
         for (ji, joint) in joints.iter().enumerate() {
             if joint.keys.is_empty() { continue; }
 
-            let filtered: Vec<&(u32, [f32; 3], [f32; 3], [f32; 4])> = joint.keys.iter()
+            let all_keys: Vec<&(u32, [f32; 3], [f32; 3], [f32; 4])> = joint.keys.iter()
                 .filter(|(frame, _, _, _)| *frame >= clip.first_frame && *frame <= clip.last_frame)
                 .collect();
-            if filtered.is_empty() { continue; }
+            if all_keys.is_empty() { continue; }
 
-            let kc = filtered.len();
-            let flags = joint.key_flags;
+            // Split keys by channel type.  After the b3d crate fix (merge of
+            // multiple KEYS chunks), position-only keys have rotation=(0,0,0,0)
+            // and rotation-only keys have position=(0,0,0) as defaults.
+            let pos_keys: Vec<_> = all_keys.iter()
+                .filter(|(_, p, _, _)| p[0] != 0.0 || p[1] != 0.0 || p[2] != 0.0)
+                .collect();
+            let scl_keys: Vec<_> = all_keys.iter()
+                .filter(|(_, _, s, _)| s[0] != 0.0 || s[1] != 0.0 || s[2] != 0.0)
+                .collect();
+            let rot_keys: Vec<_> = all_keys.iter()
+                .filter(|(_, _, _, r)| r[0] != 0.0 || r[1] != 0.0 || r[2] != 0.0 || r[3] != 0.0)
+                .collect();
 
-            // Time accessor.
-            let times_off = bin.len();
-            for (frame, _, _, _) in &filtered {
-                let t = (*frame - clip.first_frame) as f32 / fps;
-                bin.extend_from_slice(&t.to_le_bytes());
+            // Normalize time so the first keyframe is at t=0,
+            // matching the Blender plugin (k.frame - pos_keys[0].frame).
+            let first_frame = all_keys.iter().map(|(f,_,_,_)| *f).min().unwrap_or(0);
+            let last_frame = all_keys.iter().map(|(f,_,_,_)| *f).max().unwrap_or(0);
+            let t0 = first_frame as f32 / fps;
+            let t1 = last_frame as f32 / fps;
+
+            // Helper to emit one channel (with or without actual keys).
+            // If `keys` is empty, two dummy keys (t0/t1, default_val) are used
+            // to match the Blender exporter's "always-emit-TRS" convention.
+            macro_rules! emit_chan {
+                ($keys:expr, $default:expr, $path:expr, $elem_size:expr, $ty:expr, $enco:expr) => {{
+                    let kk = $keys;
+                    let kc = if kk.is_empty() { 2usize } else { kk.len() };
+                    let es = $elem_size;
+
+                    // Time accessor.
+                    let to = bin.len();
+                    if !kk.is_empty() {
+                        for (frame, _, _, _) in &kk {
+                            let t = (*frame - first_frame) as f32 / fps;
+                            bin.extend_from_slice(&t.to_le_bytes());
+                        }
+                    } else {
+                        bin.extend_from_slice(&t0.to_le_bytes());
+                        bin.extend_from_slice(&t1.to_le_bytes());
+                    }
+                    let tb = bvs.len() as u32;
+                    bvs.push(make_bv(0, to, (kc as u32 * 4) as u32, 0, 34962));
+                    let ta = acc_counter;
+                    accs.push(json!({"bufferView": tb, "componentType": 5126, "count": kc as u32, "type": "SCALAR"}));
+                    acc_counter += 1;
+
+                    // Value accessor.
+                    let vo = bin.len();
+                    if !kk.is_empty() {
+                        for k in &kk { $enco(bin, k); }
+                    } else {
+                        bin.extend_from_slice(&$default[0].to_le_bytes());
+                        bin.extend_from_slice(&$default[1].to_le_bytes());
+                        bin.extend_from_slice(&$default[2].to_le_bytes());
+                        if es > 12 {
+                            bin.extend_from_slice(&$default[3].to_le_bytes());
+                        }
+                        // duplicate for t1
+                        bin.extend_from_slice(&$default[0].to_le_bytes());
+                        bin.extend_from_slice(&$default[1].to_le_bytes());
+                        bin.extend_from_slice(&$default[2].to_le_bytes());
+                        if es > 12 {
+                            bin.extend_from_slice(&$default[3].to_le_bytes());
+                        }
+                    }
+                    let vb = bvs.len() as u32;
+                    bvs.push(make_bv(0, vo, (kc as u32 * es) as u32, es, 34962));
+                    let va = acc_counter;
+                    accs.push(json!({"bufferView": vb, "componentType": 5126, "count": kc as u32, "type": $ty}));
+                    acc_counter += 1;
+
+                    let si = samplers.len() as u32;
+                    samplers.push(json!({"input": ta, "output": va, "interpolation": "LINEAR"}));
+                    // Node 0 = root, bones start at 1.
+                    let node_i: u32 = ji as u32;
+                    channels.push(json!({"sampler": si, "target": {"node": node_i, "path": $path}}));
+                }};
             }
-            let times_bv = bvs.len() as u32;
-            bvs.push(make_bv(0, times_off, (kc * 4) as u32, 0, 34962));
 
-            let times_acc = acc_counter;
-            accs.push(json!({"bufferView": times_bv, "componentType": 5126, "count": kc as u32, "type": "SCALAR"}));
-            acc_counter += 1;
-
-            // Position channel.
-            if flags & 1 != 0 {
-                let off = bin.len();
-                for (_, p, _, _) in &filtered {
-                    let cp = neg_z_pos(*p);
+            // Position
+            let def_pos = if joint.parent.is_none() { root_pos(joint.position) } else { neg_z_pos(joint.position) };
+            let encode_pos = if joint.parent.is_none() {
+                |bin: &mut Vec<u8>, k: &&(u32, [f32;3], [f32;3], [f32;4])| {
+                    let cp = root_pos(k.1);
                     bin.extend_from_slice(&cp[0].to_le_bytes());
                     bin.extend_from_slice(&cp[1].to_le_bytes());
                     bin.extend_from_slice(&cp[2].to_le_bytes());
                 }
-                let bv_idx = bvs.len() as u32;
-                bvs.push(make_bv(0, off, (kc * 12) as u32, 12, 34962));
-                let val_acc = acc_counter;
-                accs.push(json!({"bufferView": bv_idx, "componentType": 5126, "count": kc as u32, "type": "VEC3"}));
-                acc_counter += 1;
-
-                let si = samplers.len() as u32;
-                samplers.push(json!({"input": times_acc, "output": val_acc, "interpolation": "LINEAR"}));
-                channels.push(json!({"sampler": si, "target": {"node": ji as u32, "path": "translation"}}));
-            }
-
-            // Scale channel.
-            if flags & 2 != 0 {
-                let off = bin.len();
-                for (_, _, s, _) in &filtered {
-                    bin.extend_from_slice(&s[0].to_le_bytes());
-                    bin.extend_from_slice(&s[1].to_le_bytes());
-                    bin.extend_from_slice(&s[2].to_le_bytes());
+            } else {
+                |bin: &mut Vec<u8>, k: &&(u32, [f32;3], [f32;3], [f32;4])| {
+                    let cp = neg_z_pos(k.1);
+                    bin.extend_from_slice(&cp[0].to_le_bytes());
+                    bin.extend_from_slice(&cp[1].to_le_bytes());
+                    bin.extend_from_slice(&cp[2].to_le_bytes());
                 }
-                let bv_idx = bvs.len() as u32;
-                bvs.push(make_bv(0, off, (kc * 12) as u32, 12, 34962));
-                let val_acc = acc_counter;
-                accs.push(json!({"bufferView": bv_idx, "componentType": 5126, "count": kc as u32, "type": "VEC3"}));
-                acc_counter += 1;
-
-                let si = samplers.len() as u32;
-                samplers.push(json!({"input": times_acc, "output": val_acc, "interpolation": "LINEAR"}));
-                channels.push(json!({"sampler": si, "target": {"node": ji as u32, "path": "scale"}}));
-            }
-
-            // Rotation channel.
-            if flags & 4 != 0 {
-                let off = bin.len();
-                for (_, _, _, r) in &filtered {
-                    let q = neg_z_quat(*r);
+            };
+            emit_chan!(pos_keys, def_pos, "translation", 12u32, "VEC3", encode_pos);
+            // Scale  (always identity)
+            emit_chan!(scl_keys, [1f32,1f32,1f32,0f32], "scale", 12u32, "VEC3", |bin: &mut Vec<u8>, k: &&(u32, [f32;3], [f32;3], [f32;4])| {
+                let s = k.2;
+                bin.extend_from_slice(&s[0].to_le_bytes());
+                bin.extend_from_slice(&s[1].to_le_bytes());
+                bin.extend_from_slice(&s[2].to_le_bytes());
+            });
+            // Rotation
+            let def_rot = quat_to_gltf(
+                if joint.parent.is_none() { root_quat(joint.rotation) } else { neg_z_quat(joint.rotation) }
+            );
+            let encode_rot = if joint.parent.is_none() {
+                |bin: &mut Vec<u8>, k: &&(u32, [f32;3], [f32;3], [f32;4])| {
+                    let q = quat_to_gltf(root_quat(k.3));
+                    bin.extend_from_slice(&q[0].to_le_bytes());
                     bin.extend_from_slice(&q[1].to_le_bytes());
                     bin.extend_from_slice(&q[2].to_le_bytes());
                     bin.extend_from_slice(&q[3].to_le_bytes());
-                    bin.extend_from_slice(&q[0].to_le_bytes());
                 }
-                let bv_idx = bvs.len() as u32;
-                bvs.push(make_bv(0, off, (kc * 16) as u32, 16, 34962));
-                let val_acc = acc_counter;
-                accs.push(json!({"bufferView": bv_idx, "componentType": 5126, "count": kc as u32, "type": "VEC4"}));
-                acc_counter += 1;
-
-                let si = samplers.len() as u32;
-                samplers.push(json!({"input": times_acc, "output": val_acc, "interpolation": "LINEAR"}));
-                channels.push(json!({"sampler": si, "target": {"node": ji as u32, "path": "rotation"}}));
-            }
+            } else {
+                |bin: &mut Vec<u8>, k: &&(u32, [f32;3], [f32;3], [f32;4])| {
+                    let q = quat_to_gltf(neg_z_quat(k.3));
+                    bin.extend_from_slice(&q[0].to_le_bytes());
+                    bin.extend_from_slice(&q[1].to_le_bytes());
+                    bin.extend_from_slice(&q[2].to_le_bytes());
+                    bin.extend_from_slice(&q[3].to_le_bytes());
+                }
+            };
+            emit_chan!(rot_keys, def_rot, "rotation", 16u32, "VEC4", encode_rot);
         }
 
         pad_to_4_in_place(bin);
@@ -742,13 +806,12 @@ fn calc_bounds(positions: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) {
     let mut min = [f32::MAX, f32::MAX, f32::MAX];
     let mut max = [f32::MIN, f32::MIN, f32::MIN];
     for p in positions {
-        let pz = -p[2];
         if p[0] < min[0] { min[0] = p[0]; }
         if p[1] < min[1] { min[1] = p[1]; }
-        if pz < min[2] { min[2] = pz; }
+        if p[2] < min[2] { min[2] = p[2]; }
         if p[0] > max[0] { max[0] = p[0]; }
         if p[1] > max[1] { max[1] = p[1]; }
-        if pz > max[2] { max[2] = pz; }
+        if p[2] > max[2] { max[2] = p[2]; }
     }
     (min, max)
 }
