@@ -1,6 +1,6 @@
 [package]
 name = "b3d2glb"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Convert Blitz3D B3D models to glTF/GLB"
 license = "MIT OR Apache-2.0"
