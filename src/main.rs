@@ -1,13 +1,10 @@
-mod cli;
-mod math;
-mod b3d;
-mod texture;
-mod writer;
-
-use crate::b3d::B3D;
 use std::path::Path;
 use std::fs;
 use walkdir::WalkDir;
+
+use b3d2glb::b3d::{self, B3D};
+use b3d2glb::cli;
+use b3d2glb::writer;
 
 fn main() {
     let args = match cli::parse_args() {

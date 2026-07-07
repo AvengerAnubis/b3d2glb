@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::b3d::{AnimClip, JointInfo, MeshData, compute_world_matrix};
+use crate::b3d_parser::{Brush, Texture};
 use crate::math::{mat4_inverse, neg_z_pos, neg_z_quat, quat_to_gltf, root_pos, root_quat};
 use crate::texture::{load_texture, texture_stem};
 
@@ -17,8 +18,8 @@ pub fn write_glb(
     mesh: &MeshData,
     joints: &[JointInfo],
     clips: &[AnimClip],
-    textures: &[b3d::Texture],
-    brushes: &[b3d::Brush],
+    textures: &[Texture],
+    brushes: &[Brush],
     model_name: &str,
     game_dir: &Path,
     tex_cache: &Path,
@@ -52,8 +53,8 @@ pub fn write_gltf_separate(
     mesh: &MeshData,
     joints: &[JointInfo],
     clips: &[AnimClip],
-    textures: &[b3d::Texture],
-    brushes: &[b3d::Brush],
+    textures: &[Texture],
+    brushes: &[Brush],
     model_name: &str,
     game_dir: &Path,
     tex_cache: &Path,
@@ -95,8 +96,8 @@ fn build_gltf_inner(
     mesh: &MeshData,
     joints: &[JointInfo],
     clips: &[AnimClip],
-    b3d_textures: &[b3d::Texture],
-    brushes: &[b3d::Brush],
+    b3d_textures: &[Texture],
+    brushes: &[Brush],
     model_name: &str,
     game_dir: &Path,
     tex_cache: &Path,
@@ -394,8 +395,8 @@ struct ImageInfo {
 #[allow(clippy::too_many_arguments)]
 fn build_materials(
     brush_to_mat: &HashMap<u32, usize>,
-    b3d_textures: &[b3d::Texture],
-    brushes: &[b3d::Brush],
+    b3d_textures: &[Texture],
+    brushes: &[Brush],
     model_name: &str,
     game_dir: &Path,
     tex_cache: &Path,

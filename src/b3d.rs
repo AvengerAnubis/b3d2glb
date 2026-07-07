@@ -1,5 +1,5 @@
-pub use b3d::B3D;
-use b3d::Node;
+pub use crate::b3d_parser::B3D;
+use crate::b3d_parser::Node;
 use crate::math::Mat4;
 use crate::math;
 

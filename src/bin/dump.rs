@@ -1,6 +1,6 @@
 use std::fs;
 use std::env;
-use b3d::B3D;
+use b3d2glb::b3d_parser::B3D;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -19,7 +19,7 @@ fn main() {
     dump_node(&b3d.node, 0, vcount);
 }
 
-fn dump_node(node: &b3d::Node, depth: usize, vcount: usize) {
+fn dump_node(node: &b3d2glb::b3d_parser::Node, depth: usize, vcount: usize) {
     let indent = "  ".repeat(depth);
     let has_mesh = !node.mesh.vertices.vertices.is_empty();
     if has_mesh {
