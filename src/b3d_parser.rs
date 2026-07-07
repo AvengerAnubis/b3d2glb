@@ -55,7 +55,7 @@ impl Texture {
 #[derive(Debug)]
 pub struct Brush {
     pub name: String,
-	pub color: Vec4,
+    pub color: Vec4,
 	pub shininess: f32,
 	pub blend: u32,
 	pub fx: u32,

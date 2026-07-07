@@ -139,7 +139,10 @@ fn convert_one(
 
 fn derive_context(path: &Path) -> Option<&Path> {
     if path.is_file() {
-        path.parent().and_then(|p| p.parent())
+        // Try grandparent first (typical: /game/gfx/file.b3d → /game)
+        path.parent()
+            .and_then(|p| p.parent())
+            .or_else(|| path.parent())
     } else {
         path.parent()
     }

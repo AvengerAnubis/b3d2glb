@@ -340,7 +340,11 @@ fn push_uvs(bin: &mut Vec<u8>, uvs: &[[f32; 2]]) -> usize {
 fn push_joints(bin: &mut Vec<u8>, skin: &[Option<crate::b3d::BoneWeight>]) -> usize {
     let off = bin.len();
     for s in skin {
-        let j = s.as_ref().map(|b| b.joint_idx as u16).unwrap_or(0);
+        let j = s.as_ref().map(|b| {
+            debug_assert!(b.joint_idx <= u16::MAX as u32,
+                "joint index {} exceeds u16 range (max 65535)", b.joint_idx);
+            b.joint_idx as u16
+        }).unwrap_or(0);
         bin.extend_from_slice(&j.to_le_bytes());
         bin.extend_from_slice(&0u16.to_le_bytes());
         bin.extend_from_slice(&0u16.to_le_bytes());
@@ -377,7 +381,6 @@ fn push_indices(bin: &mut Vec<u8>, tri_groups: &[crate::b3d::TriGroup]) -> usize
 
 fn build_brush_map(mesh: &MeshData) -> HashMap<u32, usize> {
     let mut map = HashMap::new();
-    map.insert(u32::MAX, 0);
     let mut sorted: Vec<u32> = mesh.tri_groups.iter().map(|t| t.brush_id).collect();
     sorted.sort();
     sorted.dedup();
@@ -407,7 +410,6 @@ fn build_materials(
 
     // Determine sorted brush IDs from the map.
     let mut sorted: Vec<(u32, usize)> = brush_to_mat.iter()
-        .filter(|&(&k, _)| k != u32::MAX)
         .map(|(&k, &v)| (k, v))
         .collect();
     sorted.sort_by_key(|&(k, _)| k);
@@ -419,9 +421,7 @@ fn build_materials(
         let brush = &brushes[brush_id as usize];
 
         // Ensure the materials vec has room.
-        while materials.len() <= mat_idx {
-            materials.push(Value::Null);
-        }
+        materials.resize(mat_idx + 1, Value::Null);
 
         let tex_ref = brush.texture_id.first().and_then(|&tid| {
             let tid = tid as usize;
@@ -834,9 +834,7 @@ mod tests {
             skin: vec![],
         };
         let map = build_brush_map(&md);
-        // Should have fallback u32::MAX → 0
-        assert_eq!(map.len(), 1);
-        assert_eq!(map.get(&u32::MAX), Some(&0));
+        assert_eq!(map.len(), 0);
     }
 
     #[test]
@@ -853,10 +851,7 @@ mod tests {
             skin: vec![],
         };
         let map = build_brush_map(&md);
-        assert_eq!(map.len(), 3); // MAX + 2 brushes
-        // u32::MAX maps to the fallback material slot 0
-        assert_eq!(map.get(&u32::MAX), Some(&0));
-        // Brush IDs map to idx starting from 0 (build_materials filters MAX)
+        assert_eq!(map.len(), 2); // 2 unique brush IDs
         assert_eq!(map.get(&2), Some(&0));
         assert_eq!(map.get(&5), Some(&1));
     }
