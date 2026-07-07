@@ -53,7 +53,7 @@ fn main() {
         .or_else(|| derive_context(&b3d_files[0]))
         .map(|p| p.to_path_buf());
 
-    if context_dir.is_none() && b3d_files.iter().any(|p| needs_textures(p)) {
+    if context_dir.is_none() {
         eprintln!("error: cannot derive context directory; provide --context");
         std::process::exit(1);
     }
@@ -145,7 +145,4 @@ fn derive_context(path: &Path) -> Option<&Path> {
     }
 }
 
-fn needs_textures(_path: &Path) -> bool {
-    // Conservative: assume any .b3d may reference textures.
-    true
-}
+
