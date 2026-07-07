@@ -50,7 +50,7 @@ col1, col2, col3]`, it becomes `col0 = row0`, which is a transpose.
 B3D quat `[w, x, y, z]` → negate rotation-axis Z → reorder to `[x, y, z, w]`:
 
 ```rust
-fn neg_z_quat(q: [f32; 4]) -> [f32; 4] {
+fn swap_yz_quat(q: [f32; 4]) -> [f32; 4] {
     [q[0], q[1], q[2], -q[3]]  // negate Z component of axis
 }
 // glTF node rotation: [q[1], q[2], q[3], q[0]]  = [x, y, z, w]

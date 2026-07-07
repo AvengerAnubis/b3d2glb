@@ -17,8 +17,8 @@ Convert Blitz3D `.b3d` models to glTF 2.0 (`.glb` or `.gltf` + `.bin` + textures
 ## Coordinate conversion
 
 B3D is left-handed Y-up; glTF is right-handed Y-up. The converter:
-- Negates Z on positions and normals
-- Negates the Z component of quaternion rotation axes (`neg_z_quat`)
+- Swaps Y and Z on positions and normals
+- Swaps the Y and Z components of quaternion rotation axes (`swap_yz_quat`)
 - Leaves scale unchanged
 
 ## Usage

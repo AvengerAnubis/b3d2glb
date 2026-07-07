@@ -27,7 +27,7 @@ src/
 ## Coordinate systems
 
 - B3D: left-handed Y-up. glTF: right-handed Y-up.
-- Positions/normals: negate Z (`neg_z_pos`).
+- Positions/normals: swap Y and Z (`swap_yz_pos`).
 - Quaternions: `[w, x, y, z]` → negate Z component → `[x, y, z, w]` for glTF.
 - All matrices are row-major (`m[row][col]`) internally.
 

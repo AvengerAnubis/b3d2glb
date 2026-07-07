@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::b3d::{AnimClip, JointInfo, MeshData, compute_world_matrix};
 use crate::b3d_parser::{Brush, Texture};
-use crate::math::{mat4_inverse, neg_z_pos, neg_z_quat, quat_to_gltf, root_pos, root_quat};
+use crate::math::{mat4_inverse, swap_yz_pos, swap_yz_quat, quat_to_gltf, root_pos, root_quat};
 use crate::texture::{load_texture, texture_stem};
 
 use serde_json::{json, Value};
@@ -526,7 +526,7 @@ fn build_node_hierarchy(joints: &[JointInfo], has_skin: bool) -> (Vec<Value>, Ve
         let (pos, rot_wxyz) = if j.parent.is_none() {
             (root_pos(j.position), root_quat(j.rotation))
         } else {
-            (neg_z_pos(j.position), neg_z_quat(j.rotation))
+            (swap_yz_pos(j.position), swap_yz_quat(j.rotation))
         };
 
         let children: Vec<u32> = (0..joints.len())
@@ -676,7 +676,7 @@ fn build_animations(
             }
 
             // Position
-            let def_pos = if joint.parent.is_none() { root_pos(joint.position) } else { neg_z_pos(joint.position) };
+            let def_pos = if joint.parent.is_none() { root_pos(joint.position) } else { swap_yz_pos(joint.position) };
             let encode_pos = if joint.parent.is_none() {
                 |bin: &mut Vec<u8>, k: &&(u32, [f32;3], [f32;3], [f32;4])| {
                     let cp = root_pos(k.1);
@@ -686,7 +686,7 @@ fn build_animations(
                 }
             } else {
                 |bin: &mut Vec<u8>, k: &&(u32, [f32;3], [f32;3], [f32;4])| {
-                    let cp = neg_z_pos(k.1);
+                    let cp = swap_yz_pos(k.1);
                     bin.extend_from_slice(&cp[0].to_le_bytes());
                     bin.extend_from_slice(&cp[1].to_le_bytes());
                     bin.extend_from_slice(&cp[2].to_le_bytes());
@@ -702,7 +702,7 @@ fn build_animations(
             });
             // Rotation
             let def_rot = quat_to_gltf(
-                if joint.parent.is_none() { root_quat(joint.rotation) } else { neg_z_quat(joint.rotation) }
+                if joint.parent.is_none() { root_quat(joint.rotation) } else { swap_yz_quat(joint.rotation) }
             );
             let encode_rot = if joint.parent.is_none() {
                 |bin: &mut Vec<u8>, k: &&(u32, [f32;3], [f32;3], [f32;4])| {
@@ -714,7 +714,7 @@ fn build_animations(
                 }
             } else {
                 |bin: &mut Vec<u8>, k: &&(u32, [f32;3], [f32;3], [f32;4])| {
-                    let q = quat_to_gltf(neg_z_quat(k.3));
+                    let q = quat_to_gltf(swap_yz_quat(k.3));
                     bin.extend_from_slice(&q[0].to_le_bytes());
                     bin.extend_from_slice(&q[1].to_le_bytes());
                     bin.extend_from_slice(&q[2].to_le_bytes());

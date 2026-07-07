@@ -3,9 +3,9 @@
 /// homogeneous row in row 3 (`m[3][0..3] = [0,0,0,1]`).
 pub type Mat4 = [[f32; 4]; 4];
 
-/// Convert a B3D position `[x, y, z]` (forward = -Z) to glTF (forward = +Y)
-/// by swapping the Y and Z axes.
-pub fn neg_z_pos(p: [f32; 3]) -> [f32; 3] {
+/// Convert a B3D position `[x, y, z]` (left-handed Y-up, forward = -Z) to
+/// glTF (right-handed Y-up, forward = +Y) by swapping the Y and Z axes.
+pub fn swap_yz_pos(p: [f32; 3]) -> [f32; 3] {
     [p[0], p[2], p[1]]
 }
 
@@ -18,14 +18,14 @@ pub fn root_pos(p: [f32; 3]) -> [f32; 3] {
 /// Convert a B3D quaternion `[w, x, y, z]` (left-handed Y-up) to right-handed
 /// Y-up by swapping the Y/Z components of the rotation axis.
 /// Result is still `[w, x, y, z]`; call sites reorder to glTF's `[x, y, z, w]`.
-pub fn neg_z_quat(q: [f32; 4]) -> [f32; 4] {
+pub fn swap_yz_quat(q: [f32; 4]) -> [f32; 4] {
     [q[0], q[1], q[3], q[2]]
 }
 
 /// Root-bone rotation: apply -90° X to the converted quaternion.
-/// q = q(-90° X) * neg_z_quat(q_b3d)
+/// q = q(-90° X) * swap_yz_quat(q_b3d)
 pub fn root_quat(q: [f32; 4]) -> [f32; 4] {
-    let q_conv = neg_z_quat(q);
+    let q_conv = swap_yz_quat(q);
     // q(-90° X) = [cos(-45°), sin(-45°), 0, 0] = [0.7071, -0.7071, 0, 0]
     let q_rot = [0.70710677, -0.70710677, 0.0, 0.0];
     quat_mul(&q_rot, &q_conv)
@@ -50,7 +50,7 @@ pub fn quat_mul(a: &[f32; 4], b: &[f32; 4]) -> [f32; 4] {
 /// Build a TRS matrix from B3D bind-pose data.
 ///
 /// `pos` and `rot` should already be converted to right-handed Y-up
-/// (via `neg_z_pos` / `neg_z_quat`).
+/// (via `swap_yz_pos` / `swap_yz_quat`).
 ///
 /// The rotation submatrix uses **column-major** formulas so that the matrix
 /// matches what glTF's TRS reconstruction produces. This ensures
@@ -303,9 +303,9 @@ mod tests {
     }
 
     #[test]
-    fn test_neg_z_pos() {
-        assert_eq!(neg_z_pos([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
-        assert_eq!(neg_z_pos([0.0, -5.0, 10.0]), [0.0, 10.0, -5.0]);
+    fn test_swap_yz_pos() {
+        assert_eq!(swap_yz_pos([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
+        assert_eq!(swap_yz_pos([0.0, -5.0, 10.0]), [0.0, 10.0, -5.0]);
     }
 
     #[test]
@@ -315,10 +315,10 @@ mod tests {
     }
 
     #[test]
-    fn test_neg_z_quat() {
+    fn test_swap_yz_quat() {
         // [w, x, y, z] → [w, x, z, y] (swap y/z components)
-        assert_eq!(neg_z_quat([1.0, 0.0, 0.0, 0.0]), [1.0, 0.0, 0.0, 0.0]);
-        assert_eq!(neg_z_quat([0.0, 1.0, 2.0, 3.0]), [0.0, 1.0, 3.0, 2.0]);
+        assert_eq!(swap_yz_quat([1.0, 0.0, 0.0, 0.0]), [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(swap_yz_quat([0.0, 1.0, 2.0, 3.0]), [0.0, 1.0, 3.0, 2.0]);
     }
 
     #[test]
@@ -337,13 +337,13 @@ mod tests {
 
     #[test]
     fn test_root_quat_applies_minus_90_x() {
-        // root_quat = q(-90°X) × neg_z_quat(identity) = q(-90°X) × identity
+        // root_quat = q(-90°X) × swap_yz_quat(identity) = q(-90°X) × identity
         // q(-90°X) = [cos(-45°), sin(-45°), 0, 0] = [0.7071, -0.7071, 0, 0]
         let r = root_quat([1.0, 0.0, 0.0, 0.0]);
         // quat_mul(&a, &b) = a * b
-        // root_quat = q_rot * neg_z_quat(q_b3d)
+        // root_quat = q_rot * swap_yz_quat(q_b3d)
         // q_rot = [0.70710677, -0.70710677, 0.0, 0.0]
-        // neg_z_quat(identity) = [1.0, 0.0, 0.0, 0.0]
+        // swap_yz_quat(identity) = [1.0, 0.0, 0.0, 0.0]
         // result = quat_mul([0.7071, -0.7071, 0, 0], [1, 0, 0, 0]) = [0.7071, -0.7071, 0, 0]
         assert!((r[0] - 0.70710677).abs() < EPS);
         assert!((r[1] + 0.70710677).abs() < EPS);
@@ -353,9 +353,9 @@ mod tests {
 
     #[test]
     fn test_neg_z_rotation_off_axis() {
-        // For a non-identity rotation, neg_z_quat swaps y/z components
+        // For a non-identity rotation, swap_yz_quat swaps y/z components
         let q = [0.7071, 0.0, 0.7071, 0.0]; // 90° around Y in [w,x,y,z]
-        let qn = neg_z_quat(q); // [w, x, z, y] = [0.7071, 0.0, 0.0, 0.7071]
+        let qn = swap_yz_quat(q); // [w, x, z, y] = [0.7071, 0.0, 0.0, 0.7071]
         assert!((qn[0] - 0.7071).abs() < EPS);
         assert!((qn[1]).abs() < EPS);
         assert!((qn[2]).abs() < EPS);

@@ -156,26 +156,47 @@ pub fn collect_mesh(b3d: &B3D) -> MeshData {
     MeshData { positions, normals, uvs, tri_groups, skin }
 }
 
-/// Compute the world-space matrix for a joint in right-handed Y-up (glTF space).
+/// Compute the world-space matrix for a single joint (recursive).
 ///
-/// B3D stores bind-pose TRS in left-handed Y-up.
-/// Conversion matches `build_node_hierarchy`: root bones use `[x, y, -z]` + -90° X,
-/// children use `[x, z, y]` / `[w, x, z, y]`.
-///
-/// The IBMs stored in the glTF skin satisfy: at bind time,
-/// `world_matrix(joint) × ibm(joint) = I`.
+/// Prefer `compute_world_matrices` for batch computation — it computes all
+/// world matrices in a single O(n) pass instead of O(n²) recursion.
 pub fn compute_world_matrix(joints: &[JointInfo], idx: usize) -> Mat4 {
     let scale = joints[idx].scale;
     let (pos, rot) = if joints[idx].parent.is_none() {
         (math::root_pos(joints[idx].position), math::root_quat(joints[idx].rotation))
     } else {
-        (math::neg_z_pos(joints[idx].position), math::neg_z_quat(joints[idx].rotation))
+        (math::swap_yz_pos(joints[idx].position), math::swap_yz_quat(joints[idx].rotation))
     };
     let local = math::b3d_to_mat4(pos, scale, rot);
     match joints[idx].parent {
         Some(p) => math::mat4_mul(&compute_world_matrix(joints, p), &local),
         None => local,
     }
+}
+
+/// Compute all world-space matrices in a single O(n) pass.
+///
+/// Joints must be ordered parent-before-child (guaranteed by `collect_joints`'s
+/// DFS traversal — a child always appears after its parent).
+///
+/// The IBMs stored in the glTF skin satisfy: at bind time,
+/// `world_matrix(joint) × ibm(joint) = I`.
+pub fn compute_world_matrices(joints: &[JointInfo]) -> Vec<Mat4> {
+    let mut world = Vec::with_capacity(joints.len());
+    for (i, joint) in joints.iter().enumerate() {
+        let scale = joint.scale;
+        let (pos, rot) = if joint.parent.is_none() {
+            (math::root_pos(joint.position), math::root_quat(joint.rotation))
+        } else {
+            (math::swap_yz_pos(joint.position), math::swap_yz_quat(joint.rotation))
+        };
+        let local = math::b3d_to_mat4(pos, scale, rot);
+        world.push(match joint.parent {
+            Some(p) => math::mat4_mul(&world[p], &local),
+            None => local,
+        });
+    }
+    world
 }
 
 #[cfg(test)]
@@ -222,9 +243,9 @@ mod tests {
         let w_child = compute_world_matrix(&joints, 1);
         let root_w = compute_world_matrix(&joints, 0);
         let child_local = math::b3d_to_mat4(
-            math::neg_z_pos([5.0, 0.0, 0.0]),
+            math::swap_yz_pos([5.0, 0.0, 0.0]),
             [1.0, 1.0, 1.0],
-            math::neg_z_quat([1.0, 0.0, 0.0, 0.0]),
+            math::swap_yz_quat([1.0, 0.0, 0.0, 0.0]),
         );
         let expected = math::mat4_mul(&root_w, &child_local);
         for i in 0..4 {
@@ -245,15 +266,15 @@ mod tests {
         let w_tip = compute_world_matrix(&joints, 2);
         let root_w = compute_world_matrix(&joints, 0);
         let mid_local = math::b3d_to_mat4(
-            math::neg_z_pos([4.0, 5.0, 6.0]),
+            math::swap_yz_pos([4.0, 5.0, 6.0]),
             [1.0, 1.0, 1.0],
-            math::neg_z_quat([1.0, 0.0, 0.0, 0.0]),
+            math::swap_yz_quat([1.0, 0.0, 0.0, 0.0]),
         );
         let mid_w = math::mat4_mul(&root_w, &mid_local);
         let tip_local = math::b3d_to_mat4(
-            math::neg_z_pos([7.0, 8.0, 9.0]),
+            math::swap_yz_pos([7.0, 8.0, 9.0]),
             [1.0, 1.0, 1.0],
-            math::neg_z_quat([1.0, 0.0, 0.0, 0.0]),
+            math::swap_yz_quat([1.0, 0.0, 0.0, 0.0]),
         );
         let expected = math::mat4_mul(&mid_w, &tip_local);
         for i in 0..4 {
