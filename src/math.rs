@@ -143,3 +143,222 @@ pub fn mat4_inverse(m: &Mat4) -> Mat4 {
     inv[3][3] = ( m20*d - m21*b + m22*a) * inv_det;
     inv
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPS: f32 = 2e-5;
+    const C: f32 = 0.70710677; // cos(45°) / sin(45°)
+
+    fn assert_mat4_eq(a: &Mat4, b: &Mat4) {
+        for i in 0..4 {
+            for j in 0..4 {
+                let diff = (a[i][j] - b[i][j]).abs();
+                assert!(diff < EPS, "mismatch at [{i}][{j}]: {} vs {}", a[i][j], b[i][j]);
+            }
+        }
+    }
+
+    fn identity() -> Mat4 {
+        [[1.0,0.0,0.0,0.0],[0.0,1.0,0.0,0.0],[0.0,0.0,1.0,0.0],[0.0,0.0,0.0,1.0]]
+    }
+
+    #[test]
+    fn test_identity_matrix() {
+        let m = b3d_to_mat4([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [1.0, 0.0, 0.0, 0.0]);
+        assert_mat4_eq(&m, &identity());
+    }
+
+    #[test]
+    fn test_translation_only() {
+        let m = b3d_to_mat4([10.0, -5.0, 3.0], [1.0, 1.0, 1.0], [1.0, 0.0, 0.0, 0.0]);
+        let expected = [
+            [1.0, 0.0, 0.0, 10.0],
+            [0.0, 1.0, 0.0, -5.0],
+            [0.0, 0.0, 1.0, 3.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        assert_mat4_eq(&m, &expected);
+    }
+
+    #[test]
+    fn test_scale_only() {
+        // Scale (2,3,4) should produce diagonal [2,3,4,1]
+        let m = b3d_to_mat4([0.0, 0.0, 0.0], [2.0, 3.0, 4.0], [1.0, 0.0, 0.0, 0.0]);
+        let expected = [
+            [2.0, 0.0, 0.0, 0.0],
+            [0.0, 3.0, 0.0, 0.0],
+            [0.0, 0.0, 4.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        assert_mat4_eq(&m, &expected);
+    }
+
+    #[test]
+    fn test_rotation_180_x() {
+        // 180° around X: quat (w=0, x=1, y=0, z=0)
+        // Column-major rotation: x unchanged, y/z flipped
+        let m = b3d_to_mat4([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [0.0, 1.0, 0.0, 0.0]);
+        let expected = [
+            [1.0,  0.0,  0.0, 0.0],
+            [0.0, -1.0,  0.0, 0.0],
+            [0.0,  0.0, -1.0, 0.0],
+            [0.0,  0.0,  0.0, 1.0],
+        ];
+        assert_mat4_eq(&m, &expected);
+    }
+
+    #[test]
+    fn test_rotation_90_y() {
+        // 90° around Y: quat (w=0.7071, x=0, y=0.7071, z=0)
+        // Rotates +X to +Z (right-handed)
+        let m = b3d_to_mat4([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [C, 0.0, C, 0.0]);
+        // Column-major: [cos=0, 0, sin=1; 0,1,0; -sin=-1,0,cos=0]
+        let expected = [
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        assert_mat4_eq(&m, &expected);
+    }
+
+    #[test]
+    fn test_mat4_inverse_identity() {
+        let inv = mat4_inverse(&identity());
+        assert_mat4_eq(&inv, &identity());
+    }
+
+    #[test]
+    fn test_mat4_inverse_translation() {
+        let m = b3d_to_mat4([5.0, -3.0, 2.0], [1.0, 1.0, 1.0], [1.0, 0.0, 0.0, 0.0]);
+        let inv = mat4_inverse(&m);
+        // Inverse should negate translation
+        let expected = b3d_to_mat4([-5.0, 3.0, -2.0], [1.0, 1.0, 1.0], [1.0, 0.0, 0.0, 0.0]);
+        assert_mat4_eq(&inv, &expected);
+    }
+
+    #[test]
+    fn test_mat4_inverse_rotation() {
+        let q = [0.5, 0.5, 0.5, 0.5]; // arbitrary unit quat
+        let m = b3d_to_mat4([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], q);
+        let inv = mat4_inverse(&m);
+        // Inverse should be transpose (since rotation matrices are orthogonal)
+        let mut expected = [[0.0; 4]; 4];
+        for i in 0..3 {
+            for j in 0..3 {
+                expected[i][j] = m[j][i];
+            }
+        }
+        expected[3][3] = 1.0;
+        assert_mat4_eq(&inv, &expected);
+    }
+
+    #[test]
+    fn test_mat4_mul_identity() {
+        let a = identity();
+        let b = b3d_to_mat4([1.0, 2.0, 3.0], [2.0, 3.0, 4.0], [1.0, 0.0, 0.0, 0.0]);
+        assert_mat4_eq(&mat4_mul(&a, &b), &b);
+        assert_mat4_eq(&mat4_mul(&b, &a), &b);
+    }
+
+    #[test]
+    fn test_matrix_times_inverse_is_identity() {
+        let test_cases = [
+            // (pos, scale, quat)
+            ([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [1.0, 0.0, 0.0, 0.0]),
+            ([5.0, -3.0, 2.0], [1.0, 1.0, 1.0], [1.0, 0.0, 0.0, 0.0]),
+            ([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [0.0, 1.0, 0.0, 0.0]),
+            ([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [C, 0.0, C, 0.0]),
+            ([10.0, 20.0, -5.0], [1.0, 1.0, 1.0], [0.7071, 0.0, 0.0, 0.7071]),
+            ([0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [0.9239, 0.3827, 0.0, 0.0]), // 45° X
+        ];
+        for (pos, scale, rot) in &test_cases {
+            let m = b3d_to_mat4(*pos, *scale, *rot);
+            let inv = mat4_inverse(&m);
+            let product = mat4_mul(&m, &inv);
+            assert_mat4_eq(&product, &identity());
+        }
+    }
+
+    /// CRITICAL: The IBM must satisfy joint_matrix = node_matrix * IBM = I
+    /// at bind time. This test verifies that b3d_to_mat4 builds a matrix
+    /// whose inverse, when multiplied on the right, yields identity.
+    #[test]
+    fn test_joint_matrix_is_identity_at_bind() {
+        // Simulate a root bone with position + rotation.
+        let b3d_pos = [0.0333, 17.5667, -6.0212];
+        let b3d_rot = [1.0, 0.0, 0.0, 0.0];
+        let scale = [1.0, 1.0, 1.0];
+
+        let (gltf_pos, gltf_rot) = (root_pos(b3d_pos), root_quat(b3d_rot));
+        // glTF node matrix = b3d_to_mat4(gltf_pos, scale, gltf_rot)
+        let node_mat = b3d_to_mat4(gltf_pos, scale, gltf_rot);
+        // IBM = inv(b3d_to_mat4(gltf_pos, scale, gltf_rot))
+        let ibm = mat4_inverse(&node_mat);
+        // joint_matrix = node_mat * ibm should be I
+        let joint_mat = mat4_mul(&node_mat, &ibm);
+        assert_mat4_eq(&joint_mat, &identity());
+    }
+
+    #[test]
+    fn test_neg_z_pos() {
+        assert_eq!(neg_z_pos([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
+        assert_eq!(neg_z_pos([0.0, -5.0, 10.0]), [0.0, 10.0, -5.0]);
+    }
+
+    #[test]
+    fn test_root_pos() {
+        assert_eq!(root_pos([1.0, 2.0, 3.0]), [1.0, 2.0, -3.0]);
+        assert_eq!(root_pos([0.0, 5.0, -10.0]), [0.0, 5.0, 10.0]);
+    }
+
+    #[test]
+    fn test_neg_z_quat() {
+        // [w, x, y, z] → [w, x, z, y] (swap y/z components)
+        assert_eq!(neg_z_quat([1.0, 0.0, 0.0, 0.0]), [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(neg_z_quat([0.0, 1.0, 2.0, 3.0]), [0.0, 1.0, 3.0, 2.0]);
+    }
+
+    #[test]
+    fn test_quat_to_gltf() {
+        // Internal [w, x, z, y] → glTF [x, z, y, w]
+        assert_eq!(quat_to_gltf([1.0, 0.0, 0.0, 0.0]), [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(quat_to_gltf([0.0, 1.0, 0.0, 0.0]), [1.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_quat_mul_identity() {
+        let q = [0.7071, 0.7071, 0.0, 0.0];
+        assert_eq!(quat_mul(&[1.0, 0.0, 0.0, 0.0], &q), q);
+        assert_eq!(quat_mul(&q, &[1.0, 0.0, 0.0, 0.0]), q);
+    }
+
+    #[test]
+    fn test_root_quat_applies_minus_90_x() {
+        // root_quat = q(-90°X) × neg_z_quat(identity) = q(-90°X) × identity
+        // q(-90°X) = [cos(-45°), sin(-45°), 0, 0] = [0.7071, -0.7071, 0, 0]
+        let r = root_quat([1.0, 0.0, 0.0, 0.0]);
+        // quat_mul(&a, &b) = a * b
+        // root_quat = q_rot * neg_z_quat(q_b3d)
+        // q_rot = [0.70710677, -0.70710677, 0.0, 0.0]
+        // neg_z_quat(identity) = [1.0, 0.0, 0.0, 0.0]
+        // result = quat_mul([0.7071, -0.7071, 0, 0], [1, 0, 0, 0]) = [0.7071, -0.7071, 0, 0]
+        assert!((r[0] - 0.70710677).abs() < EPS);
+        assert!((r[1] + 0.70710677).abs() < EPS);
+        assert!((r[2]).abs() < EPS);
+        assert!((r[3]).abs() < EPS);
+    }
+
+    #[test]
+    fn test_neg_z_rotation_off_axis() {
+        // For a non-identity rotation, neg_z_quat swaps y/z components
+        let q = [0.7071, 0.0, 0.7071, 0.0]; // 90° around Y in [w,x,y,z]
+        let qn = neg_z_quat(q); // [w, x, z, y] = [0.7071, 0.0, 0.0, 0.7071]
+        assert!((qn[0] - 0.7071).abs() < EPS);
+        assert!((qn[1]).abs() < EPS);
+        assert!((qn[2]).abs() < EPS);
+        assert!((qn[3] - 0.7071).abs() < EPS);
+    }
+}

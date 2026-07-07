@@ -161,6 +161,9 @@ pub fn collect_mesh(b3d: &B3D) -> MeshData {
 /// B3D stores bind-pose TRS in left-handed Y-up.
 /// Conversion matches `build_node_hierarchy`: root bones use `[x, y, -z]` + -90° X,
 /// children use `[x, z, y]` / `[w, x, z, y]`.
+///
+/// The IBMs stored in the glTF skin satisfy: at bind time,
+/// `world_matrix(joint) × ibm(joint) = I`.
 pub fn compute_world_matrix(joints: &[JointInfo], idx: usize) -> Mat4 {
     let scale = joints[idx].scale;
     let (pos, rot) = if joints[idx].parent.is_none() {
@@ -172,5 +175,115 @@ pub fn compute_world_matrix(joints: &[JointInfo], idx: usize) -> Mat4 {
     match joints[idx].parent {
         Some(p) => math::mat4_mul(&compute_world_matrix(joints, p), &local),
         None => local,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math;
+
+    const EPS: f32 = 2e-5;
+
+    fn make_joint(name: &str, pos: [f32; 3], rot: [f32; 4], parent: Option<usize>) -> JointInfo {
+        JointInfo {
+            name: name.to_string(),
+            position: pos,
+            scale: [1.0, 1.0, 1.0],
+            rotation: rot,
+            parent,
+            keys: vec![],
+        }
+    }
+
+    #[test]
+    fn test_compute_world_matrix_root() {
+        let joints = vec![make_joint("root", [0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], None)];
+        let w = compute_world_matrix(&joints, 0);
+        let expected = math::b3d_to_mat4(
+            math::root_pos([0.0, 0.0, 0.0]),
+            [1.0, 1.0, 1.0],
+            math::root_quat([1.0, 0.0, 0.0, 0.0]),
+        );
+        for i in 0..4 {
+            for j in 0..4 {
+                assert!((w[i][j] - expected[i][j]).abs() < EPS,
+                    "mismatch at [{i}][{j}]: {} vs {}", w[i][j], expected[i][j]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_compute_world_matrix_single_child() {
+        let joints = vec![
+            make_joint("root", [10.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], None),
+            make_joint("child", [5.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], Some(0)),
+        ];
+        let w_child = compute_world_matrix(&joints, 1);
+        let root_w = compute_world_matrix(&joints, 0);
+        let child_local = math::b3d_to_mat4(
+            math::neg_z_pos([5.0, 0.0, 0.0]),
+            [1.0, 1.0, 1.0],
+            math::neg_z_quat([1.0, 0.0, 0.0, 0.0]),
+        );
+        let expected = math::mat4_mul(&root_w, &child_local);
+        for i in 0..4 {
+            for j in 0..4 {
+                assert!((w_child[i][j] - expected[i][j]).abs() < EPS,
+                    "mismatch at [{i}][{j}]: {} vs {}", w_child[i][j], expected[i][j]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_compute_world_matrix_chain() {
+        let joints = vec![
+            make_joint("root", [1.0, 2.0, 3.0], [1.0, 0.0, 0.0, 0.0], None),
+            make_joint("mid", [4.0, 5.0, 6.0], [1.0, 0.0, 0.0, 0.0], Some(0)),
+            make_joint("tip", [7.0, 8.0, 9.0], [1.0, 0.0, 0.0, 0.0], Some(1)),
+        ];
+        let w_tip = compute_world_matrix(&joints, 2);
+        let root_w = compute_world_matrix(&joints, 0);
+        let mid_local = math::b3d_to_mat4(
+            math::neg_z_pos([4.0, 5.0, 6.0]),
+            [1.0, 1.0, 1.0],
+            math::neg_z_quat([1.0, 0.0, 0.0, 0.0]),
+        );
+        let mid_w = math::mat4_mul(&root_w, &mid_local);
+        let tip_local = math::b3d_to_mat4(
+            math::neg_z_pos([7.0, 8.0, 9.0]),
+            [1.0, 1.0, 1.0],
+            math::neg_z_quat([1.0, 0.0, 0.0, 0.0]),
+        );
+        let expected = math::mat4_mul(&mid_w, &tip_local);
+        for i in 0..4 {
+            for j in 0..4 {
+                assert!((w_tip[i][j] - expected[i][j]).abs() < EPS,
+                    "mismatch at [{i}][{j}]: {} vs {}", w_tip[i][j], expected[i][j]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_world_times_ibm_is_identity() {
+        // Use real monkey.b3d joint data (root + child + grandchild)
+        let joints = vec![
+            make_joint("root", [0.0333, 17.5667, -6.0212], [1.0, 0.0, 0.0, 0.0], None),
+            make_joint("child", [-9.5327, 5.2530, 4.6003], [0.3942, 0.7666, 0.2318, 0.4508], Some(0)),
+            make_joint("grandchild", [0.0, 0.0, -13.4415], [-0.0302, 0.0841, -0.3368, 0.9373], Some(1)),
+        ];
+        for i in 0..joints.len() {
+            let w = compute_world_matrix(&joints, i);
+            let ibm = math::mat4_inverse(&w);
+            let product = math::mat4_mul(&w, &ibm);
+            for r in 0..4 {
+                for c in 0..4 {
+                    let expected = if r == c { 1.0 } else { 0.0 };
+                    assert!((product[r][c] - expected).abs() < EPS,
+                        "joint[{i}] product[{r}][{c}]: {} vs {} (expected I)",
+                        product[r][c], expected);
+                }
+            }
+        }
     }
 }

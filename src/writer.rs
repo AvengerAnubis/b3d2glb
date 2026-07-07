@@ -802,6 +802,107 @@ fn build_image_uris(
 // Misc
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::b3d::{JointInfo, MeshData, TriGroup};
+
+    #[test]
+    fn test_calc_bounds_basic() {
+        let positions = vec![[1.0, 2.0, 3.0], [4.0, -5.0, 6.0], [-7.0, 8.0, -9.0]];
+        let (min, max) = calc_bounds(&positions);
+        assert_eq!(min, [-7.0, -5.0, -9.0]);
+        assert_eq!(max, [4.0, 8.0, 6.0]);
+    }
+
+    #[test]
+    fn test_calc_bounds_single() {
+        let positions = vec![[10.0, 20.0, 30.0]];
+        let (min, max) = calc_bounds(&positions);
+        assert_eq!(min, max);
+        assert_eq!(min, [10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn test_build_brush_map_empty() {
+        let md = MeshData {
+            positions: vec![],
+            normals: vec![],
+            uvs: vec![],
+            tri_groups: vec![],
+            skin: vec![],
+        };
+        let map = build_brush_map(&md);
+        // Should have fallback u32::MAX → 0
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get(&u32::MAX), Some(&0));
+    }
+
+    #[test]
+    fn test_build_brush_map_sorted() {
+        let md = MeshData {
+            positions: vec![],
+            normals: vec![],
+            uvs: vec![],
+            tri_groups: vec![
+                TriGroup { brush_id: 5, indices: vec![0,1,2] },
+                TriGroup { brush_id: 2, indices: vec![3,4,5] },
+                TriGroup { brush_id: 5, indices: vec![6,7,8] },
+            ],
+            skin: vec![],
+        };
+        let map = build_brush_map(&md);
+        assert_eq!(map.len(), 3); // MAX + 2 brushes
+        // u32::MAX maps to the fallback material slot 0
+        assert_eq!(map.get(&u32::MAX), Some(&0));
+        // Brush IDs map to idx starting from 0 (build_materials filters MAX)
+        assert_eq!(map.get(&2), Some(&0));
+        assert_eq!(map.get(&5), Some(&1));
+    }
+
+    #[test]
+    fn test_build_node_hierarchy_no_joints() {
+        let (nodes, scene) = build_node_hierarchy(&[], false);
+        // n=0 → armature at 0, ROOT at 1 (2 nodes)
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].get("name").and_then(|v| v.as_str()), Some("armature"));
+        assert_eq!(nodes[1].get("name").and_then(|v| v.as_str()), Some("ROOT"));
+        assert_eq!(nodes[1].get("mesh").and_then(|v| v.as_u64()), Some(0));
+        assert!(nodes[1].get("skin").is_none());
+        assert_eq!(scene, vec![1u32]);
+    }
+
+    #[test]
+    fn test_build_node_hierarchy_single_joint() {
+        let joints = vec![
+            JointInfo {
+                name: "hip".into(),
+                position: [0.0, 10.0, -5.0],
+                scale: [1.0, 1.0, 1.0],
+                rotation: [1.0, 0.0, 0.0, 0.0],
+                parent: None,
+                keys: vec![],
+            },
+        ];
+        let (nodes, scene) = build_node_hierarchy(&joints, true);
+        // 1 bone + 1 armature + 1 ROOT = 3 nodes
+        assert_eq!(nodes.len(), 3);
+        // node 0 = hip
+        assert_eq!(nodes[0].get("name").and_then(|v| v.as_str()), Some("hip"));
+        // node 1 = armature
+        assert_eq!(nodes[1].get("name").and_then(|v| v.as_str()), Some("armature"));
+        assert_eq!(nodes[1]["children"][0].as_u64(), Some(0));
+        // node 2 = ROOT with mesh + skin + armature child
+        assert_eq!(nodes[2].get("name").and_then(|v| v.as_str()), Some("ROOT"));
+        assert_eq!(nodes[2]["children"][0].as_u64(), Some(1));
+        assert_eq!(nodes[2]["mesh"].as_u64(), Some(0));
+        assert_eq!(nodes[2]["skin"].as_u64(), Some(0));
+        // scene has just ROOT
+        assert_eq!(scene.len(), 1);
+        assert_eq!(scene[0], 2);
+    }
+}
+
 fn calc_bounds(positions: &[[f32; 3]]) -> ([f32; 3], [f32; 3]) {
     let mut min = [f32::MAX, f32::MAX, f32::MAX];
     let mut max = [f32::MIN, f32::MIN, f32::MIN];
