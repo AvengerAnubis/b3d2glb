@@ -183,7 +183,7 @@ pub fn compute_world_matrix(joints: &[JointInfo], idx: usize) -> Mat4 {
 /// `world_matrix(joint) × ibm(joint) = I`.
 pub fn compute_world_matrices(joints: &[JointInfo]) -> Vec<Mat4> {
     let mut world = Vec::with_capacity(joints.len());
-    for (i, joint) in joints.iter().enumerate() {
+    for joint in joints.iter() {
         let scale = joint.scale;
         let (pos, rot) = if joint.parent.is_none() {
             (math::root_pos(joint.position), math::root_quat(joint.rotation))
