@@ -13,6 +13,12 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
+//
+// ---------------------------------------------------------------------------
+// Portions of this file are derived from the `b3d` crate
+// (https://github.com/DotWith/b3d/) by DotWith,
+// licensed under MIT OR Apache-2.0.
+// ---------------------------------------------------------------------------
 
 use std::io::{Read, Seek};
 use std::fmt;

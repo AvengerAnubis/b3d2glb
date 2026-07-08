@@ -1,0 +1,14 @@
+b3d2glb — Copyright (C) 2024  Avenger Anubis (Ilya) <avenger.anubis@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version. See LICENSE for details.
+
+-----------------------------------------------------------------------
+Third-Party Code
+-----------------------------------------------------------------------
+
+src/b3d_parser.rs and src/b3d_parser/utils.rs contain code derived from
+the `b3d` crate (https://github.com/DotWith/b3d/) by DotWith,
+licensed under MIT OR Apache-2.0.
