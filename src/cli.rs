@@ -1,5 +1,21 @@
 use std::path::PathBuf;
 
+/// Expand a leading `~` to the user's home directory.
+fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~") {
+        if let Ok(home) = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+        {
+            if rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\') {
+                let mut p = PathBuf::from(home);
+                p.push(rest.trim_start_matches('/').trim_start_matches('\\'));
+                return p;
+            }
+        }
+    }
+    PathBuf::from(path)
+}
+
 /// Override material PBR parameters (metallic, roughness).
 #[derive(Debug, Clone, Copy)]
 pub struct MaterialParams {
@@ -112,14 +128,14 @@ pub fn parse_args() -> Result<Args, String> {
                 if i >= raw.len() {
                     return Err("-o/--out requires a value".into());
                 }
-                args.out_dir = PathBuf::from(&raw[i]);
+                args.out_dir = expand_tilde(&raw[i]);
             }
             "-c" | "--context" => {
                 i += 1;
                 if i >= raw.len() {
                     return Err("-c/--context requires a value".into());
                 }
-                args.context_dir = Some(PathBuf::from(&raw[i]));
+                args.context_dir = Some(expand_tilde(&raw[i]));
             }
             "-m" | "--material" => {
                 i += 1;
@@ -142,7 +158,7 @@ pub fn parse_args() -> Result<Args, String> {
                 return Err(format!("unknown option: {s}"));
             }
             _ => {
-                args.inputs.push(PathBuf::from(&raw[i]));
+                args.inputs.push(expand_tilde(&raw[i]));
             }
         }
         i += 1;
