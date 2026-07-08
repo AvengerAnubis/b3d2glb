@@ -26,8 +26,9 @@ pub fn write_glb(
     tex_cache: &Path,
     out_path: &Path,
     material_params: Option<MaterialParams>,
+    color_override: Option<[f32; 4]>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (root, bin, _) = build_gltf_inner(mesh, joints, clips, textures, brushes, model_name, game_dir, tex_cache, true, material_params)?;
+    let (root, bin, _) = build_gltf_inner(mesh, joints, clips, textures, brushes, model_name, game_dir, tex_cache, true, material_params, color_override)?;
 
     let json_str = serde_json::to_string(&root)?;
     let json_padded = pad_to_4(json_str.as_bytes());
@@ -62,8 +63,9 @@ pub fn write_gltf_separate(
     tex_cache: &Path,
     out_path: &Path,
     material_params: Option<MaterialParams>,
+    color_override: Option<[f32; 4]>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (mut root, bin, image_infos) = build_gltf_inner(mesh, joints, clips, textures, brushes, model_name, game_dir, tex_cache, false, material_params)?;
+    let (mut root, bin, image_infos) = build_gltf_inner(mesh, joints, clips, textures, brushes, model_name, game_dir, tex_cache, false, material_params, color_override)?;
 
     // Write binary buffer.
     let bin_path = out_path.with_extension("bin");
@@ -106,6 +108,7 @@ fn build_gltf_inner(
     tex_cache: &Path,
     _embed_images: bool,
     material_params: Option<MaterialParams>,
+    color_override: Option<[f32; 4]>,
 ) -> Result<(Value, Vec<u8>, Vec<ImageInfo>), Box<dyn std::error::Error>> {
     let vc = mesh.positions.len();
     let has_skin = !joints.is_empty() && mesh.skin.iter().any(|s| s.is_some());
@@ -113,7 +116,7 @@ fn build_gltf_inner(
     // --- materials ---------------------------------------------------------
     let brush_to_mat = build_brush_map(mesh);
     let (materials, image_infos, fallback_mat) = build_materials(
-        &brush_to_mat, b3d_textures, brushes, model_name, game_dir, tex_cache, material_params,
+        &brush_to_mat, b3d_textures, brushes, model_name, game_dir, tex_cache, material_params, color_override,
     )?;
 
     // --- vertex buffer -----------------------------------------------------
@@ -359,10 +362,14 @@ fn build_materials(
     game_dir: &Path,
     tex_cache: &Path,
     material_params: Option<MaterialParams>,
+    color_override: Option<[f32; 4]>,
 ) -> Result<(Vec<Value>, Vec<ImageInfo>, usize), Box<dyn std::error::Error>> {
     // Use user-supplied material params, or sensible defaults.
     let metallic = material_params.map(|p| p.metallic).unwrap_or(0.0);
     let roughness = material_params.map(|p| p.roughness).unwrap_or(0.9);
+
+    // When --color is given, use it as the fallback grey; otherwise keep [0.8,0.8,0.8,1].
+    let fallback_color = color_override.unwrap_or([0.8, 0.8, 0.8, 1.0]);
 
     let mut materials: Vec<Value> = Vec::new();
     let mut image_infos: Vec<ImageInfo> = Vec::new();
@@ -466,7 +473,7 @@ fn build_materials(
         materials.clear();
         materials.push(json!({
             "pbrMetallicRoughness": {
-                "baseColorFactor": [0.8, 0.8, 0.8, 1.0],
+                "baseColorFactor": fallback_color,
                 "metallicFactor": metallic,
                 "roughnessFactor": roughness,
             },

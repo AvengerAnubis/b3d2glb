@@ -76,7 +76,7 @@ fn main() {
 
         eprint!("  {stem} ... ");
 
-        match convert_one(path, &out_path, ctx, &tex_cache, args.glb, args.material_params) {
+        match convert_one(path, &out_path, ctx, &tex_cache, args.glb, args.material_params, args.color_override) {
             Ok(true) => {
                 eprintln!("OK");
                 count += 1;
@@ -103,6 +103,7 @@ fn convert_one(
     tex_cache: &Path,
     glb_mode: bool,
     material_params: Option<MaterialParams>,
+    color_override: Option<[f32; 4]>,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let data = fs::read(in_path)?;
     let b3d_parsed = B3D::read(&data)
@@ -130,9 +131,9 @@ fn convert_one(
     let clips = b3d::collect_anims(&b3d_parsed.node);
 
     if glb_mode {
-        writer::write_glb(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, model_name, game_dir, tex_cache, out_path, material_params)?;
+        writer::write_glb(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, model_name, game_dir, tex_cache, out_path, material_params, color_override)?;
     } else {
-        writer::write_gltf_separate(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, model_name, game_dir, tex_cache, out_path, material_params)?;
+        writer::write_gltf_separate(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, model_name, game_dir, tex_cache, out_path, material_params, color_override)?;
     }
 
     Ok(true)

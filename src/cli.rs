@@ -20,6 +20,25 @@ pub struct Args {
     pub glb: bool,
     /// Override material PBR parameters (metallic, roughness).
     pub material_params: Option<MaterialParams>,
+    /// Override baseColorFactor for non-textured materials (r,g,b[,a]).
+    pub color_override: Option<[f32; 4]>,
+}
+
+/// Parse a color string "r,g,b[,a]" (each 0.0–1.0).
+fn parse_color(s: &str) -> Result<[f32; 4], String> {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.len() < 3 || parts.len() > 4 {
+        return Err(format!("invalid color format '{s}'. Use 'r,g,b' or 'r,g,b,a' (e.g. 1.0,0.5,0.0)"));
+    }
+    let r: f32 = parts[0].trim().parse().map_err(|_| format!("invalid red: {}", parts[0]))?;
+    let g: f32 = parts[1].trim().parse().map_err(|_| format!("invalid green: {}", parts[1]))?;
+    let b: f32 = parts[2].trim().parse().map_err(|_| format!("invalid blue: {}", parts[2]))?;
+    let a: f32 = if parts.len() == 4 {
+        parts[3].trim().parse().map_err(|_| format!("invalid alpha: {}", parts[3]))?
+    } else {
+        1.0
+    };
+    Ok([r, g, b, a])
 }
 
 fn parse_material(s: &str) -> Result<MaterialParams, String> {
@@ -58,6 +77,7 @@ OPTIONS:
   -c, --context DIR       Context / game root directory (texture lookup root)
   -b, --glb               Write binary .glb instead of separate .gltf + .bin + textures
   -m, --material PARAMS   Override material params (e.g. 0.0m0.9r or 0.0,0.9)
+  -C, --color R,G,B[,A]   Base color for non-textured materials (default: 0.8,0.8,0.8,1)
   -h, --help              Display this help and exit
 
 EXAMPLES:
@@ -65,6 +85,7 @@ EXAMPLES:
   b3d2glb --glb -o ./out /path/to/game/gfx
   b3d2glb -b model.b3d
   b3d2glb -b -m 0.0m0.9r model.b3d
+  b3d2glb -b -C 0.8,0.8,0.8 model.b3d
 ";
 
 /// Parse command-line arguments or print help and exit.
@@ -76,6 +97,7 @@ pub fn parse_args() -> Result<Args, String> {
         context_dir: None,
         glb: false,
         material_params: None,
+        color_override: None,
     };
 
     let mut i = 1;
@@ -105,6 +127,13 @@ pub fn parse_args() -> Result<Args, String> {
                     return Err("-m/--material requires a value".into());
                 }
                 args.material_params = Some(parse_material(&raw[i])?);
+            }
+            "-C" | "--color" => {
+                i += 1;
+                if i >= raw.len() {
+                    return Err("-C/--color requires a value".into());
+                }
+                args.color_override = Some(parse_color(&raw[i])?);
             }
             "-b" | "--glb" => {
                 args.glb = true;
