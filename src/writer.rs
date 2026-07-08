@@ -109,11 +109,191 @@ pub fn write_gltf_separate(
 }
 
 // ---------------------------------------------------------------------------
+// High-level Converter API
+// ---------------------------------------------------------------------------
+
+/// Builder-style converter for B3D → glTF/GLB conversion.
+///
+/// Provides the same functionality as the CLI but as a library API.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use b3d2glb::writer::Converter;
+/// use std::path::Path;
+///
+/// let b3d_data = std::fs::read("model.b3d").unwrap();
+/// let glb_bytes = Converter::new("model", Path::new("/path/to/game"))
+///     .glb(true)
+///     .material(0.0, 0.9)
+///     .convert_bytes(&b3d_data)
+///     .unwrap();
+/// ```
+pub struct Converter {
+    model_name: String,
+    game_dir: std::path::PathBuf,
+    tex_cache: std::path::PathBuf,
+    glb_mode: bool,
+    material: Option<crate::cli::MaterialParams>,
+    color_override: Option<[f32; 4]>,
+}
+
+impl Converter {
+    /// Create a new converter with default settings.
+    ///
+    /// * `model_name` — used for texture fallback and output naming.
+    /// * `game_dir` — root directory for texture search (usually the game install dir).
+    pub fn new(model_name: &str, game_dir: &std::path::Path) -> Self {
+        let tex_cache = std::env::temp_dir().join("b3d2glb");
+        Self {
+            model_name: model_name.to_owned(),
+            game_dir: game_dir.to_owned(),
+            tex_cache,
+            glb_mode: true,
+            material: None,
+            color_override: None,
+        }
+    }
+
+    /// Set a custom texture cache directory.
+    /// Defaults to a temporary directory.
+    pub fn tex_cache(mut self, path: &std::path::Path) -> Self {
+        self.tex_cache = path.to_owned();
+        self
+    }
+
+    /// Enable/disable GLB mode.  Default: `true`.
+    ///
+    /// When `true`, the output is a single `.glb` file with all data embedded.
+    /// When `false`, the output is a `.gltf` file with external `.bin` and textures.
+    pub fn glb(mut self, glb: bool) -> Self {
+        self.glb_mode = glb;
+        self
+    }
+
+    /// Set metallic and roughness factors for all materials.
+    /// Default: metallic=0.0, roughness=1.0.
+    pub fn material(mut self, metallic: f32, roughness: f32) -> Self {
+        self.material = Some(crate::cli::MaterialParams { metallic, roughness });
+        self
+    }
+
+    /// Override the base color for materials without a texture.
+    /// Default: `[0.8, 0.8, 0.8, 1.0]`.
+    pub fn color_override(mut self, r: f32, g: f32, b: f32, a: f32) -> Self {
+        self.color_override = Some([r, g, b, a]);
+        self
+    }
+
+    /// Convert raw B3D bytes to a complete GLB buffer (in memory).
+    ///
+    /// Returns the complete `.glb` file contents.
+    pub fn convert_bytes(&self, b3d_data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let (root, bin, _images) = self.build(b3d_data)?;
+
+        // Assemble GLB: header + JSON chunk + BIN chunk
+        let json_str = serde_json::to_string(&root)?;
+        let json_bytes = pad_to_4(json_str.as_bytes());
+
+        let mut glb = Vec::new();
+        // GLB header (12 bytes)
+        glb.extend_from_slice(b"glTF");
+        glb.extend_from_slice(&2u32.to_le_bytes()); // version 2
+        // Total length: header(12) + JSON chunk(8+json.len()) + BIN chunk(8+bin.len())
+        let total_len = 12 + 8 + json_bytes.len() as u32 + 8 + bin.len() as u32;
+        glb.extend_from_slice(&total_len.to_le_bytes());
+        // JSON chunk
+        glb.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+        glb.extend_from_slice(b"JSON");
+        glb.extend_from_slice(&json_bytes);
+        // BIN chunk
+        glb.extend_from_slice(&(bin.len() as u32).to_le_bytes());
+        glb.extend_from_slice(b"BIN\x00");
+        glb.extend_from_slice(&bin);
+
+        Ok(glb)
+    }
+
+    /// Convert a B3D file to a GLB file on disk.
+    pub fn convert_to_file(&self, input: &std::path::Path, output: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+        if self.glb_mode {
+            let b3d_data = std::fs::read(input)?;
+            let glb = self.convert_bytes(&b3d_data)?;
+            std::fs::write(output, &glb)?;
+            Ok(())
+        } else {
+            // For separate mode, delegate to the existing function.
+            let b3d_data = std::fs::read(input)?;
+            let b3d_parsed = crate::b3d_parser::B3D::read(&b3d_data)
+                .map_err(|e| format!("parse error: {e}"))?;
+
+            let vcount = b3d_parsed.node.mesh.vertices.vertices.len();
+            if vcount == 0 {
+                return Ok(());
+            }
+
+            let mut joints = Vec::new();
+            let mut vertex_joint: Vec<Option<(usize, f32)>> = vec![None; vcount];
+            crate::b3d::collect_joints(&b3d_parsed.node, None, &mut joints, &mut vertex_joint, vcount, true);
+            let mesh = crate::b3d::collect_mesh(&b3d_parsed);
+            let clips = crate::b3d::collect_anims(&b3d_parsed.node);
+
+            write_gltf_separate(
+                &mesh, &joints, &clips,
+                &b3d_parsed.textures, &b3d_parsed.brushes,
+                &self.model_name, &self.game_dir, &self.tex_cache,
+                output,
+                self.material,
+                self.color_override,
+            )
+        }
+    }
+
+    /// Low-level: parse and build glTF data structures from B3D bytes.
+    ///
+    /// Returns the glTF JSON root, the binary buffer, and any embedded images.
+    pub fn build(&self, b3d_data: &[u8]) -> Result<(serde_json::Value, Vec<u8>, Vec<ImageInfo>), Box<dyn std::error::Error>> {
+        let b3d_parsed = crate::b3d_parser::B3D::read(b3d_data)
+            .map_err(|e| format!("parse error: {e}"))?;
+
+        let vcount = b3d_parsed.node.mesh.vertices.vertices.len();
+        if vcount == 0 {
+            return Err("model has no vertices".into());
+        }
+
+        let mut joints = Vec::new();
+        let mut vertex_joint: Vec<Option<(usize, f32)>> = vec![None; vcount];
+        crate::b3d::collect_joints(&b3d_parsed.node, None, &mut joints, &mut vertex_joint, vcount, true);
+        let mut mesh = crate::b3d::collect_mesh(&b3d_parsed);
+        // Apply joint data to mesh skin (collect_mesh doesn't do this).
+        for (vi, j) in vertex_joint.iter().enumerate() {
+            mesh.skin[vi] = j.as_ref().map(|(ji, w)| crate::b3d::BoneWeight {
+                joint_idx: *ji as u32,
+                weight: *w,
+            });
+        }
+        let clips = crate::b3d::collect_anims(&b3d_parsed.node);
+
+        // Ensure texture cache dir exists
+        let _ = std::fs::create_dir_all(&self.tex_cache);
+
+        build_gltf_inner(
+            &mesh, &joints, &clips,
+            &b3d_parsed.textures, &b3d_parsed.brushes,
+            &self.model_name, &self.game_dir, &self.tex_cache,
+            self.glb_mode,
+            self.material,
+            self.color_override,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Internal: build the glTF JSON root + binary buffer
 // ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
-fn build_gltf_inner(
+pub fn build_gltf_inner(
     mesh: &MeshData,
     joints: &[JointInfo],
     clips: &[AnimClip],
@@ -268,13 +448,13 @@ fn make_bv(buffer: u32, offset: usize, length: u32, stride: u32, target: u32) ->
     o
 }
 
-fn pad_to_4(data: &[u8]) -> Vec<u8> {
+pub fn pad_to_4(data: &[u8]) -> Vec<u8> {
     let mut v = data.to_vec();
     while v.len() % 4 != 0 { v.push(0x20); }
     v
 }
 
-fn pad_to_4_in_place(data: &mut Vec<u8>) {
+pub fn pad_to_4_in_place(data: &mut Vec<u8>) {
     while data.len() % 4 != 0 { data.push(0); }
 }
 
@@ -364,9 +544,9 @@ fn build_brush_map(mesh: &MeshData) -> HashMap<u32, usize> {
     map
 }
 
-struct ImageInfo {
-    mime: String,
-    data: Vec<u8>,
+pub struct ImageInfo {
+    pub mime: String,
+    pub data: Vec<u8>,
 }
 
 #[allow(clippy::too_many_arguments)]
