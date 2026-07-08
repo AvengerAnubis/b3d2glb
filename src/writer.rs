@@ -381,7 +381,13 @@ fn build_materials(
 
         let color = brush.color;
 
-        let mat_val = if let Some(tex) = tex_ref {
+        // Check B3D alpha hints: texture has alpha channel (flags & 2),
+        // uses color-key masking (flags & 4), or alpha blend mode (blend == 1).
+        let tex_has_alpha = tex_ref.map_or(false, |t| {
+            (t.flags & 2 != 0) || (t.flags & 4 != 0) || t.blend == 1
+        });
+
+        let mut mat_val = if let Some(tex) = tex_ref {
             let raw = tex.file.trim_start_matches(".\\").trim_start_matches("./");
             let png_bytes = load_texture(raw, game_dir, tex_cache);
 
@@ -418,6 +424,13 @@ fn build_materials(
                 "doubleSided": true,
             })
         };
+
+        if tex_has_alpha {
+            if let Some(obj) = mat_val.as_object_mut() {
+                obj.insert("alphaMode".into(), json!("MASK"));
+                obj.insert("alphaCutoff".into(), json!(0.5));
+            }
+        }
 
         materials[mat_idx] = mat_val;
     }
