@@ -536,14 +536,14 @@ mod tests {
     // ===================================================================
     #[test]
     fn test_parse_monkey_version() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         assert_eq!(b3d.version, 1);
     }
 
     #[test]
     fn test_parse_monkey_node_count() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         // ROOT + 18 joint nodes = 19 total
         assert_eq!(count_nodes(&b3d.node), 19);
@@ -551,7 +551,7 @@ mod tests {
 
     #[test]
     fn test_parse_monkey_node_names() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         let names = collect_names(&b3d.node);
         let expected: Vec<&str> = vec![
@@ -571,7 +571,7 @@ mod tests {
 
     #[test]
     fn test_parse_monkey_root_mesh() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         // Only ROOT has a mesh
         assert!(!b3d.node.mesh.vertices.vertices.is_empty(),
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_parse_monkey_mesh_triangles() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         // ROOT mesh has triangles (expected ~500+ depending on monkey detail)
         let tri_count: usize = b3d.node.mesh.triangles.iter()
@@ -594,7 +594,7 @@ mod tests {
 
     #[test]
     fn test_parse_monkey_joint1_bones() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         let j1 = find_node(&b3d.node, "joint1").unwrap();
         assert_eq!(j1.bones.len(), 37, "joint1 should have 37 bones");
@@ -605,7 +605,7 @@ mod tests {
 
     #[test]
     fn test_parse_monkey_joint4_bones() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         let j4 = find_node(&b3d.node, "joint4").unwrap();
         assert_eq!(j4.bones.len(), 84, "joint4 should have 84 bones");
@@ -613,7 +613,7 @@ mod tests {
 
     #[test]
     fn test_parse_monkey_joint12_bones() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         let j12 = find_node(&b3d.node, "joint12").unwrap();
         assert_eq!(j12.bones.len(), 6, "joint12 should have 6 bones");
@@ -624,7 +624,7 @@ mod tests {
     // data (from separate KEYS chunks merged by the fix).
     #[test]
     fn test_parse_monkey_all_joints_have_keys() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         let joint_names = [
             "joint1", "joint2", "joint3", "joint4", "joint5", "joint6",
@@ -658,7 +658,7 @@ mod tests {
 
     #[test]
     fn test_parse_monkey_root_has_no_keys() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         assert_eq!(b3d.node.keys.len(), 0, "ROOT should have no keys");
         assert_eq!(b3d.node.key_flags, 0, "ROOT should have no key_flags");
@@ -667,7 +667,7 @@ mod tests {
     // ── Verify position / rotation values on a known joint ───────────────
     #[test]
     fn test_parse_monkey_joint1_identity_pose() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         let j1 = find_node(&b3d.node, "joint1").unwrap();
         // joint1 is at (0.0333, 17.5667, -6.0212) with identity rotation
@@ -683,7 +683,7 @@ mod tests {
 
     #[test]
     fn test_parse_monkey_joint2_pose() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         let j2 = find_node(&b3d.node, "joint2").unwrap();
         // joint2 at (-9.5327, 5.2530, 4.6003) with non-identity rotation
@@ -695,7 +695,7 @@ mod tests {
     // ── Verify child/parent hierarchy ────────────────────────────────────
     #[test]
     fn test_parse_monkey_parent_child_relationships() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         // ROOT has 1 direct child (joint1)
         assert_eq!(b3d.node.children.len(), 1,
@@ -722,7 +722,7 @@ mod tests {
 
     #[test]
     fn test_parse_monkey_brushes_textures() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         // monkey.b3d has 1 brush ("monkeyskin.bmp")
         assert_eq!(b3d.brushes.len(), 1,
@@ -738,7 +738,7 @@ mod tests {
     // ── Verify scale is identity for all joints ──────────────────────────
     #[test]
     fn test_parse_monkey_all_scales_identity() {
-        let data = include_bytes!("../tests/data/monkey.b3d");
+        let data = include_bytes!("../tests/in/monkey.b3d");
         let b3d = B3D::read(data).unwrap();
         let names = collect_names(&b3d.node);
         for name in &names {
