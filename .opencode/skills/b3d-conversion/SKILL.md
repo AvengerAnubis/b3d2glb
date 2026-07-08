@@ -99,6 +99,58 @@ indices.push(tri[1]);
 4. `joint_matrix[i] = GT(joint[i]) * ibm[i]` must equal `spawn_transform`
 5. Any stretched/black render means IBMs are wrong
 
+## Texture alpha transparency
+
+`alphaMode` is determined in this order:
+
+1. **B3D texture flags**: `flags & 2` (alpha channel), `flags & 4` (color key),
+   `blend == 1` (alpha blend).
+2. **Pixel fallback**: if flags don't indicate alpha, the PNG bytes are
+   scanned for any non-opaque pixel (`png_has_alpha()` in `texture.rs`).
+3. If either check passes → `alphaMode: "MASK"` + `alphaCutoff: 0.5`.
+
+**Common pitfall**: many B3D files from Stranded II don't set transparency
+flags. The pixel fallback is essential.
+
+## Missing normals (black model in Bevy)
+
+B3D `Verts.flags & 1 == 0` means per-vertex normals are not stored. The
+converter computes them from triangle faces in `compute_normals()` (b3d.rs):
+
+1. Iterate triangles, compute face normal via cross product of two edges
+2. Accumulate face normal into all three vertices (area-weighted)
+3. Normalize all vertex normals at the end
+
+Computation happens **after** coordinate conversion (Z negated, CW→CCW
+winding flipped) so the result is correct for glTF.
+
+## CLI material/color overrides
+
+```bash
+# Set metallic=0.0, roughness=0.9 (dot-syntax):
+b3d2glb -m 0.0m0.9r -o out model.b3d
+
+# Same with comma syntax:
+b3d2glb -m 0.0,0.9 -o out model.b3d
+
+# Override fallback base color (RGBA):
+b3d2glb -C 0.5,0.5,0.5,1.0 -o out model.b3d
+
+# Override fallback base color (RGB, alpha defaults to 1.0):
+b3d2glb -C 1.0,0.0,0.0 -o out model.b3d
+```
+
+## Texture search strategy
+
+`find_texture()` in `texture.rs` tries paths in order:
+
+1. `context_dir / raw_path` (preserves B3D directory structure)
+2. `context_dir / filename` (filename only from B3D path)
+3. `context_dir / lowercase_filename`
+4. Legacy: `context_dir / mods/Stranded II/gfx/` and `context_dir / gfx/`
+
+Each strategy tries extensions: `.bmp`, `.jpg`, `.jpeg`, `.png`, `.tga`.
+
 ## Original game location (Stranded II)
 
 ```

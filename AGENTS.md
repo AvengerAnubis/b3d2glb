@@ -1,52 +1,63 @@
 # Project context for AI agents
 
-## What this project does
+## Что это за проект
 
-`b3d2glb` converts Blitz3D `.b3d` model files to glTF 2.0 format (either
-binary `.glb` or separate `.gltf` + `.bin` + texture files).
+`b3d2glb` конвертирует Blitz3D `.b3d` модели в формат glTF 2.0 (бинарный
+`.glb` или отдельные `.gltf` + `.bin` + текстуры).
 
-It is part of a larger **Stranded II remake** project — the original game
-files are located at:
+Часть проекта **Stranded II remake**. Оригинальные файлы игры:
 
 ```
 /home/admen/Games/umu/umu-default/drive_c/Games/StrandedII/
 ```
 
-## Architecture
+## Лицензия
+
+Проект распространяется под **GNU GPL v3** (см. `LICENSE`).
+
+Весь код в `src/` — GPLv3, за исключением `src/b3d_parser.rs` и
+`src/b3d_parser/utils.rs`, которые содержат код, производный от крейта
+[`b3d`](https://github.com/DotWith/b3d/) (DotWith, MIT OR Apache-2.0).
+См. `NOTICE`.
+
+## Архитектура
 
 ```
 src/
-  main.rs     — entry point, file discovery, dispatch
-  cli.rs      — CLI argument parsing (--out, --context, --glb, --help)
-  math.rs     — Mat4 type, matrix ops (mul, inverse), coord conversion
-  b3d.rs      — B3D data extraction (joints, mesh, animation clips)
-  texture.rs  — texture lookup, PNG conversion, disk caching
-  writer.rs   — glTF/GLB output generation
+  main.rs              — точка входа, поиск файлов, диспетчеризация
+  cli.rs               — парсинг аргументов CLI
+  math.rs              — Mat4, умножение, обращение, конвертация координат
+  b3d.rs               — извлечение данных из B3D: джоинты, меш, анимация
+  b3d_parser.rs        — парсер B3D-формата (производный от DotWith/b3d)
+  b3d_parser/utils.rs  — вспомогательные типы (Vec2, Vec3, Vec4, Chunk)
+  texture.rs           — поиск текстур, конвертация в PNG, кеш на диске
+  writer.rs            — генерация glTF/GLB
+  lib.rs               — реэкспорт модулей
+  bin/dump.rs          — утилита для дампа B3D-файлов
 ```
 
-## Coordinate systems
+## Системы координат
 
-- B3D: left-handed Y-up. glTF: right-handed Y-up.
-- Positions/normals: swap Y and Z (`swap_yz_pos`).
-- Quaternions: `[w, x, y, z]` → negate Z component → `[x, y, z, w]` for glTF.
-- All matrices are row-major (`m[row][col]`) internally.
+- B3D: левая, Y-up. glTF: правая, Y-up.
+- Позиции/нормали: `swap_yz_pos` меняет Y и Z местами.
+- Кватернионы: `[w, x, y, z]` → negate Z → `[x, y, z, w]` для glTF.
+- Матрицы внутри проекта — **row-major** (`m[row][col]`), но пишутся в буфер
+  **column-by-column** (glTF требует column-major).
 
-## Important technical details
+## Ключевые технические детали
 
-### Matrix convention
+### Матричная конвенция
 
-`b3d_to_mat4` returns a row-major TRS matrix with translation in `m[3][0..2]`.
-This is *transposed* relative to the standard column-major convention
-(translation in `m[0..2][3]`).
+`b3d_to_mat4` возвращает row-major TRS-матрицу с трансляцией в `m[3][0..2]`
+(последняя строка). Это *транспонировано* относительно стандартной
+column-major конвенции, где трансляция в `m[0..2][3]` (последний столбец).
 
-`compute_world_matrix` multiplies parent × local: `world = parent * local`.
-Because `b3d_to_mat4` returns the transpose of the standard matrix, the
-multiplication order appears correct when following the B3D hierarchy.
+`compute_world_matrix(parent, local)` = `parent * local` — умножение работает
+корректно в row-major.
 
-### IBM (inverse bind matrix) serialization
+### IBM (inverse bind matrix) сериализация
 
-Inverse bind matrices are written to the GLB binary buffer **column-by-column**
-for glTF's column-major layout:
+IBMs пишутся в GLB-буфер **column-by-column** для column-major лэйаута glTF:
 
 ```rust
 for col in 0..4 {
@@ -57,20 +68,69 @@ for col in 0..4 {
 }
 ```
 
-The old implementation wrote row-by-row, which produced transposed IBMs and
-caused stretched/black renders in Bevy.
+Старая реализация писала row-by-row → транспонированные IBM → чёрный
+растянутый рендер в Bevy.
 
 ### B3D vertex-joint mapping
 
-B3D stores at most *one* bone per vertex (weight=1.0). Unskinned vertices
-receive joint=0/weight=0 (4-wide JOINT/WEIGHT vectors padded with zeros).
+B3D хранит **максимум 1 кость на вершину** (weight=1.0). Не-скиненные
+вершины получают joint=0/weight=0 (4-широкие JOINT/WEIGHT векторы с
+нулями).
 
-## Development
+### Флаги B3D-вертексов (`Verts.flags`)
+
+- `flags & 1` — есть нормали. Если **нет** (флаг=0) → нормали
+  **вычисляются** из треугольников (функция `compute_normals()` в b3d.rs).
+- `flags & 2` — есть цвет вершины.
+
+### Прозрачность текстур
+
+`alphaMode` в glTF-материале определяется так:
+1. B3D-флаги текстуры: `flags & 2` (alpha канал), `flags & 4` (color key),
+   `blend == 1` (alpha blend mode).
+2. **Фолбэк**: если флаги молчат — проверяются фактические пиксели PNG
+   (`png_has_alpha()`). Если есть не полностью непрозрачные пиксели →
+   `alphaMode: "MASK"` + `alphaCutoff: 0.5`.
+
+### Поиск текстур (`find_texture`)
+
+Стратегии (первое совпадение побеждает):
+1. `context_dir / raw_path` (сохраняет структуру директорий из B3D)
+2. `context_dir / filename` (только имя файла)
+3. `context_dir / lowercase_filename`
+4. Легаси-пути Stranded II: `mods/Stranded II/gfx/` и `gfx/`
+
+Текстуры кешируются как PNG в `<out>/textures/<stem>.png`.
+
+### CLI аргументы
+
+| Флаг | Назначение |
+|------|-----------|
+| `-b` / `--glb` | бинарный GLB вместо раздельных файлов |
+| `-o DIR` / `--out DIR` | выходная директория |
+| `-c DIR` / `--context DIR` | корневая директория для поиска текстур |
+| `-m VAL` / `--material VAL` | металлик/раффнесс (например `0.0m0.9r` или `0.0,0.9`) |
+| `-C R,G,B[,A]` / `--color R,G,B[,A]` | базовый цвет фолбэка |
+| `--help` | справка |
+
+### Нормали
+
+Если B3D-файл не содержит нормали (`flags & 1 == 0`), они вычисляются
+из треугольников через взвешенное векторное произведение. Вычисление
+происходит ПОСЛЕ конвертации координат в glTF-пространство (Z negate).
+
+## Разработка
 
 ```bash
-# Build
 cargo build --release
 
-# Test with monkey model
-cargo run --release -- -b -o /tmp/out -c /path/to/StrandedII ./monkey.b3d
+# Тест с monkey.b3d (есть скин, текстура, анимация)
+cargo run --bin b3d2glb --release -- -b -o /tmp/test \
+  -c /path/to/StrandedII /path/to/StrandedII/gfx/monkey.b3d
+
+# Дамп структуры B3D-файла
+cargo run --bin dump --release -- /path/to/model.b3d
+
+# Тесты
+cargo test
 ```
