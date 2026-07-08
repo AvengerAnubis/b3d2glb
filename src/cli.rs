@@ -1,5 +1,12 @@
 use std::path::PathBuf;
 
+/// Override material PBR parameters (metallic, roughness).
+#[derive(Debug, Clone, Copy)]
+pub struct MaterialParams {
+    pub metallic: f32,
+    pub roughness: f32,
+}
+
 /// Parsed command-line arguments.
 #[derive(Debug)]
 pub struct Args {
@@ -11,6 +18,30 @@ pub struct Args {
     pub context_dir: Option<PathBuf>,
     /// Whether to write a single .glb (otherwise .gltf + .bin + textures).
     pub glb: bool,
+    /// Override material PBR parameters (metallic, roughness).
+    pub material_params: Option<MaterialParams>,
+}
+
+fn parse_material(s: &str) -> Result<MaterialParams, String> {
+    // Parse format like "0.0m0.9r" or "0.5,0.3"
+    if let Some((metallic_str, rest)) = s.split_once('m') {
+        if let Some(roughness_str) = rest.strip_suffix('r') {
+            let metallic: f32 = metallic_str.parse()
+                .map_err(|_| format!("invalid metallic value: {metallic_str}"))?;
+            let roughness: f32 = roughness_str.parse()
+                .map_err(|_| format!("invalid roughness value: {roughness_str}"))?;
+            return Ok(MaterialParams { metallic, roughness });
+        }
+    }
+    // Fallback: comma-separated "metallic,roughness"
+    if let Some((m, r)) = s.split_once(',') {
+        let metallic: f32 = m.trim().parse()
+            .map_err(|_| format!("invalid metallic value: {m}"))?;
+        let roughness: f32 = r.trim().parse()
+            .map_err(|_| format!("invalid roughness value: {r}"))?;
+        return Ok(MaterialParams { metallic, roughness });
+    }
+    Err(format!("invalid material format '{s}'. Use '<metallic>m<roughness>r' (e.g. 0.0m0.9r) or '<metallic>,<roughness>' (e.g. 0.0,0.9)"))
 }
 
 const USAGE: &str = "\
@@ -23,15 +54,17 @@ ARGS:
   input...   One or more .b3d files or directories containing .b3d files.
 
 OPTIONS:
-  -o, --out DIR      Output directory (default: current directory)
-  -c, --context DIR  Context / game root directory (texture lookup root)
-  -b, --glb          Write binary .glb instead of separate .gltf + .bin + textures
-  -h, --help         Display this help and exit
+  -o, --out DIR           Output directory (default: current directory)
+  -c, --context DIR       Context / game root directory (texture lookup root)
+  -b, --glb               Write binary .glb instead of separate .gltf + .bin + textures
+  -m, --material PARAMS   Override material params (e.g. 0.0m0.9r or 0.0,0.9)
+  -h, --help              Display this help and exit
 
 EXAMPLES:
   b3d2glb -o ./out -c /path/to/game model.b3d
   b3d2glb --glb -o ./out /path/to/game/gfx
   b3d2glb -b model.b3d
+  b3d2glb -b -m 0.0m0.9r model.b3d
 ";
 
 /// Parse command-line arguments or print help and exit.
@@ -42,6 +75,7 @@ pub fn parse_args() -> Result<Args, String> {
         out_dir: PathBuf::from("."),
         context_dir: None,
         glb: false,
+        material_params: None,
     };
 
     let mut i = 1;
@@ -64,6 +98,13 @@ pub fn parse_args() -> Result<Args, String> {
                     return Err("-c/--context requires a value".into());
                 }
                 args.context_dir = Some(PathBuf::from(&raw[i]));
+            }
+            "-m" | "--material" => {
+                i += 1;
+                if i >= raw.len() {
+                    return Err("-m/--material requires a value".into());
+                }
+                args.material_params = Some(parse_material(&raw[i])?);
             }
             "-b" | "--glb" => {
                 args.glb = true;

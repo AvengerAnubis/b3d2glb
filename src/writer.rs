@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::b3d::{AnimClip, JointInfo, MeshData, compute_world_matrices};
 use crate::b3d_parser::{Brush, Texture};
+use crate::cli::MaterialParams;
 use crate::math::{mat4_inverse, swap_yz_pos, swap_yz_quat, quat_to_gltf, root_pos, root_quat};
 use crate::texture::load_texture;
 
@@ -24,8 +25,9 @@ pub fn write_glb(
     game_dir: &Path,
     tex_cache: &Path,
     out_path: &Path,
+    material_params: Option<MaterialParams>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (root, bin, _) = build_gltf_inner(mesh, joints, clips, textures, brushes, model_name, game_dir, tex_cache, true)?;
+    let (root, bin, _) = build_gltf_inner(mesh, joints, clips, textures, brushes, model_name, game_dir, tex_cache, true, material_params)?;
 
     let json_str = serde_json::to_string(&root)?;
     let json_padded = pad_to_4(json_str.as_bytes());
@@ -59,8 +61,9 @@ pub fn write_gltf_separate(
     game_dir: &Path,
     tex_cache: &Path,
     out_path: &Path,
+    material_params: Option<MaterialParams>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (mut root, bin, image_infos) = build_gltf_inner(mesh, joints, clips, textures, brushes, model_name, game_dir, tex_cache, false)?;
+    let (mut root, bin, image_infos) = build_gltf_inner(mesh, joints, clips, textures, brushes, model_name, game_dir, tex_cache, false, material_params)?;
 
     // Write binary buffer.
     let bin_path = out_path.with_extension("bin");
@@ -102,6 +105,7 @@ fn build_gltf_inner(
     game_dir: &Path,
     tex_cache: &Path,
     _embed_images: bool,
+    material_params: Option<MaterialParams>,
 ) -> Result<(Value, Vec<u8>, Vec<ImageInfo>), Box<dyn std::error::Error>> {
     let vc = mesh.positions.len();
     let has_skin = !joints.is_empty() && mesh.skin.iter().any(|s| s.is_some());
@@ -109,7 +113,7 @@ fn build_gltf_inner(
     // --- materials ---------------------------------------------------------
     let brush_to_mat = build_brush_map(mesh);
     let (materials, image_infos, fallback_mat) = build_materials(
-        &brush_to_mat, b3d_textures, brushes, model_name, game_dir, tex_cache,
+        &brush_to_mat, b3d_textures, brushes, model_name, game_dir, tex_cache, material_params,
     )?;
 
     // --- vertex buffer -----------------------------------------------------
@@ -354,7 +358,12 @@ fn build_materials(
     model_name: &str,
     game_dir: &Path,
     tex_cache: &Path,
+    material_params: Option<MaterialParams>,
 ) -> Result<(Vec<Value>, Vec<ImageInfo>, usize), Box<dyn std::error::Error>> {
+    // Use user-supplied material params, or sensible defaults.
+    let metallic = material_params.map(|p| p.metallic).unwrap_or(0.0);
+    let roughness = material_params.map(|p| p.roughness).unwrap_or(0.9);
+
     let mut materials: Vec<Value> = Vec::new();
     let mut image_infos: Vec<ImageInfo> = Vec::new();
     let fallback_mat = 0usize;
@@ -399,8 +408,8 @@ fn build_materials(
                     "pbrMetallicRoughness": {
                         "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
                         "baseColorTexture": { "index": tex_idx },
-                        "metallicFactor": 0.0,
-                        "roughnessFactor": 0.9,
+                        "metallicFactor": metallic,
+                        "roughnessFactor": roughness,
                     },
                     "doubleSided": true,
                 })
@@ -408,8 +417,8 @@ fn build_materials(
                 json!({
                     "pbrMetallicRoughness": {
                         "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
-                        "metallicFactor": 0.0,
-                        "roughnessFactor": 0.9,
+                        "metallicFactor": metallic,
+                        "roughnessFactor": roughness,
                     },
                     "doubleSided": true,
                 })
@@ -418,8 +427,8 @@ fn build_materials(
             json!({
                 "pbrMetallicRoughness": {
                     "baseColorFactor": [color[0], color[1], color[2], color[3]],
-                    "metallicFactor": 0.0,
-                    "roughnessFactor": 0.9,
+                    "metallicFactor": metallic,
+                    "roughnessFactor": roughness,
                 },
                 "doubleSided": true,
             })
@@ -458,8 +467,8 @@ fn build_materials(
         materials.push(json!({
             "pbrMetallicRoughness": {
                 "baseColorFactor": [0.8, 0.8, 0.8, 1.0],
-                "metallicFactor": 0.0,
-                "roughnessFactor": 0.9,
+                "metallicFactor": metallic,
+                "roughnessFactor": roughness,
             },
             "doubleSided": true,
         }));

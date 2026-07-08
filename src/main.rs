@@ -3,7 +3,7 @@ use std::fs;
 use walkdir::WalkDir;
 
 use b3d2glb::b3d::{self, B3D};
-use b3d2glb::cli;
+use b3d2glb::cli::{self, MaterialParams};
 use b3d2glb::writer;
 
 fn main() {
@@ -76,7 +76,7 @@ fn main() {
 
         eprint!("  {stem} ... ");
 
-        match convert_one(path, &out_path, ctx, &tex_cache, args.glb) {
+        match convert_one(path, &out_path, ctx, &tex_cache, args.glb, args.material_params) {
             Ok(true) => {
                 eprintln!("OK");
                 count += 1;
@@ -102,6 +102,7 @@ fn convert_one(
     game_dir: &Path,
     tex_cache: &Path,
     glb_mode: bool,
+    material_params: Option<MaterialParams>,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let data = fs::read(in_path)?;
     let b3d_parsed = B3D::read(&data)
@@ -129,9 +130,9 @@ fn convert_one(
     let clips = b3d::collect_anims(&b3d_parsed.node);
 
     if glb_mode {
-        writer::write_glb(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, model_name, game_dir, tex_cache, out_path)?;
+        writer::write_glb(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, model_name, game_dir, tex_cache, out_path, material_params)?;
     } else {
-        writer::write_gltf_separate(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, model_name, game_dir, tex_cache, out_path)?;
+        writer::write_gltf_separate(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, model_name, game_dir, tex_cache, out_path, material_params)?;
     }
 
     Ok(true)
