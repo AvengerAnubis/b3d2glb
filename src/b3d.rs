@@ -123,10 +123,84 @@ pub fn collect_anims(node: &Node) -> Vec<AnimClip> {
     anims
 }
 
+/// Small helper: cross product of two 3D vectors.
+fn cross(a: &[f32; 3], b: &[f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// Small helper: add two 3D vectors component-wise.
+fn add_vec3(a: &[f32; 3], b: &[f32; 3]) -> [f32; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+/// Small helper: L2 norm of a 3D vector.
+fn norm(v: &[f32; 3]) -> f32 {
+    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+}
+
+/// Compute vertex normals from triangle data (face-weighted average).
+///
+/// Uses the already-converted positions (glTF space) and the already-flipped
+/// CCW winding.  For each triangle the face normal is `cross(e1, e2)`, then
+/// accumulated into each of the three vertices and finally normalized.
+fn compute_normals(positions: &[[f32; 3]], tri_groups: &[TriGroup]) -> Vec<[f32; 3]> {
+    let vc = positions.len();
+    let mut normals = vec![[0.0f32; 3]; vc];
+
+    for tg in tri_groups {
+        for tri in tg.indices.chunks(3) {
+            if tri.len() < 3 {
+                continue;
+            }
+            let i0 = tri[0] as usize;
+            let i1 = tri[1] as usize;
+            let i2 = tri[2] as usize;
+
+            // Guard against out-of-range indices (shouldn't happen).
+            if i0 >= vc || i1 >= vc || i2 >= vc {
+                continue;
+            }
+
+            let v0 = &positions[i0];
+            let v1 = &positions[i1];
+            let v2 = &positions[i2];
+
+            let e1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
+            let e2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+            let n = cross(&e1, &e2);
+
+            normals[i0] = add_vec3(&normals[i0], &n);
+            normals[i1] = add_vec3(&normals[i1], &n);
+            normals[i2] = add_vec3(&normals[i2], &n);
+        }
+    }
+
+    // Normalize.
+    for n in &mut normals {
+        let len = norm(n);
+        if len > 0.0 {
+            let inv = 1.0 / len;
+            n[0] *= inv;
+            n[1] *= inv;
+            n[2] *= inv;
+        }
+    }
+
+    normals
+}
+
 /// Extract mesh geometry from a parsed B3D file.
+///
+/// If the B3D vertex data has no per-vertex normals (`flags & 1 == 0`),
+/// normals are computed from the triangle faces.
 pub fn collect_mesh(b3d: &B3D) -> MeshData {
     let verts = &b3d.node.mesh.vertices;
     let vc = verts.vertices.len();
+    let has_normals = (verts.flags & 1) != 0;
 
     let mut positions = Vec::with_capacity(vc);
     let mut normals = Vec::with_capacity(vc);
@@ -145,11 +219,17 @@ pub fn collect_mesh(b3d: &B3D) -> MeshData {
     for tris in &b3d.node.mesh.triangles {
         let mut indices = Vec::with_capacity(tris.indices.len() * 3);
         for tri in &tris.indices {
+            // Flip winding: B3D stores CW → glTF expects CCW.
             indices.push(tri[0]);
             indices.push(tri[2]);
             indices.push(tri[1]);
         }
         tri_groups.push(TriGroup { brush_id: tris.brush_id, indices });
+    }
+
+    // If the B3D file didn't store per-vertex normals, compute them.
+    if !has_normals && !tri_groups.is_empty() {
+        normals = compute_normals(&positions, &tri_groups);
     }
 
     let skin = (0..vc).map(|_| None).collect();
