@@ -21,6 +21,9 @@ architecture.
   requires 4-byte alignment for buffer sections.
 - **Project is GPL-3.0-only** (see `LICENSE`). Code derived from DotWith/b3d
   is MIT OR Apache-2.0 (see `NOTICE`). Respect all license notices.
+- **Maintain the library API**: `Converter` builder, `build_gltf_inner`,
+  `ImageInfo`, `pad_to_4`, `pad_to_4_in_place` are all `pub`. Do not break
+  callers without a major version bump.
 
 ## Testing
 

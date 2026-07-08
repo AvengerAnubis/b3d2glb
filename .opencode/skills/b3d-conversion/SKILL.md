@@ -151,6 +151,64 @@ b3d2glb -C 1.0,0.0,0.0 -o out model.b3d
 
 Each strategy tries extensions: `.bmp`, `.jpg`, `.jpeg`, `.png`, `.tga`.
 
+## Library API (`Converter` builder)
+
+The `Converter` struct in `writer.rs` is the high-level library API:
+
+```rust
+use b3d2glb::writer::Converter;
+
+// Minimal: B3D bytes → GLB bytes
+let glb: Vec<u8> = Converter::new("model_name", "/path/to/game")
+    .convert_bytes(&b3d_bytes)?;
+
+// Builder options:
+let glb = Converter::new("model", "/path/to/game")
+    .glb(true)                          // output .glb (default: true)
+    .material(0.0, 0.9)                 // metallic, roughness
+    .color_override(1.0, 0.0, 0.0, 0.5) // fallback base colour
+    .tex_cache(&"/tmp/cache")           // texture PNG cache
+    .convert_bytes(&b3d_data)?;
+
+// Write directly to file:
+Converter::new("model", "/path/to/game")
+    .convert_to_file(input_path, output_path)?;
+
+// Low-level access (JSON, buffer, images):
+let (json, bin, images) = Converter::new("model", "/path/to/game")
+    .build(&b3d_data)?;
+```
+
+### Public module functions
+
+| Module | Function | Purpose |
+|--------|----------|---------|
+| `writer` | `build_gltf_inner(...)` | Parsed B3D → `(JSON, Buffer, Images)` |
+| `writer` | `pad_to_4(data)` | 4-byte alignment |
+| `writer` | `pad_to_4_in_place(data)` | 4-byte alignment (in-place) |
+| `b3d` | `B3D::read(&bytes)` | Parse B3D file |
+| `b3d` | `collect_mesh(&b3d)` | Extract mesh data |
+| `b3d` | `collect_joints(&b3d)` | Extract bone data |
+| `b3d` | `collect_anims(&b3d)` | Extract animation data |
+
+### Testing the library API
+
+```bash
+# Run all tests including API tests
+cargo test
+
+# Specific API tests
+cargo test api_
+```
+
+There are 8 integration tests in `tests/e2e.rs` covering the `Converter` API:
+`api_convert_bytes_valid_glb`, `api_convert_bytes_has_skin`,
+`api_convert_to_file_writes_glb`, `api_build_returns_gltf_data`,
+`api_convert_bytes_with_material_override`,
+`api_convert_bytes_with_color_override`,
+`api_convert_empty_data_returns_error`,
+`api_convert_invalid_data_returns_error`.
+
 ## Original game location (Stranded II)
 
 ```

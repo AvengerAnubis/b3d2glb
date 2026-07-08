@@ -102,6 +102,51 @@ B3D хранит **максимум 1 кость на вершину** (weight=1
 
 Текстуры кешируются как PNG в `<out>/textures/<stem>.png`.
 
+## Library API
+
+### `Converter` (builder)
+
+```rust
+use b3d2glb::writer::Converter;
+
+// B3D → GLB в память
+let glb: Vec<u8> = Converter::new("model", "/path/to/game")
+    .convert_bytes(&b3d_data)?;
+
+// С опциями
+let glb = Converter::new("model", "/path/to/game")
+    .glb(true)
+    .material(0.0, 0.9)
+    .color_override(1.0, 0.0, 0.0, 0.5)
+    .tex_cache(&"/tmp/cache")
+    .convert_bytes(&b3d_data)?;
+
+// В файл
+Converter::new("model", "/path/to/game")
+    .convert_to_file(input_path, output_path)?;
+
+// Низкоуровневый доступ к glTF-структурам
+let (json, bin, images) = Converter::new("model", "/path/to/game")
+    .build(&b3d_data)?;
+```
+
+### Публичные функции (модуль `writer`)
+
+| Функция | Описание |
+|---------|----------|
+| `build_gltf_inner(...)` | Распаршенные B3D → `(JSON, Buffer, Images)` |
+| `pad_to_4(data)` | Выровнять до 4 байт |
+| `pad_to_4_in_place(data)` | Выровнять до 4 байт (in-place) |
+
+### Публичные функции (модуль `b3d`)
+
+| Функция | Описание |
+|---------|----------|
+| `B3D::read(&bytes)` | Распарсить B3D |
+| `collect_mesh(&b3d)` | Извлечь меш |
+| `collect_joints(&b3d)` | Извлечь кости |
+| `collect_anims(&b3d)` | Извлечь анимации |
+
 ### CLI аргументы
 
 | Флаг | Назначение |
