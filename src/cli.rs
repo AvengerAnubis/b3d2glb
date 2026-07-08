@@ -17,11 +17,26 @@
 use std::path::PathBuf;
 
 /// Expand a leading `~` to the user's home directory.
+///
+/// Works on:
+/// - Linux / macOS (`$HOME`)
+/// - Windows (`$USERPROFILE`, or `$HOMEDRIVE$HOMEPATH`)
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~") {
-        if let Ok(home) = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-        {
+        // Prefer USERPROFILE (Windows), fall back to HOME (Unix),
+        // then try HOMEDRIVE+HOMEPATH (Windows fallback).
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .or_else(|_| {
+                let drive = std::env::var("HOMEDRIVE").unwrap_or_default();
+                let dir = std::env::var("HOMEPATH").unwrap_or_default();
+                if !drive.is_empty() && !dir.is_empty() {
+                    Ok(format!("{drive}{dir}"))
+                } else {
+                    Err(std::env::VarError::NotPresent)
+                }
+            });
+        if let Ok(home) = home {
             if rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\') {
                 let mut p = PathBuf::from(home);
                 p.push(rest.trim_start_matches('/').trim_start_matches('\\'));

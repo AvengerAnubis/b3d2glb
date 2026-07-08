@@ -25,8 +25,13 @@ use std::path::{Path, PathBuf};
 /// 3. `game_dir / lowercase_filename`
 /// 4. Legacy Stranded II paths (`mods/Stranded II/gfx/` and `gfx/`)
 pub fn find_texture(raw_path: &str, game_dir: &Path) -> Option<PathBuf> {
-    let clean = raw_path.trim_start_matches(".\\").trim_start_matches("./");
-    let tex_path = Path::new(clean);
+    // Normalize B3D Windows backslashes to forward slashes so Path works
+    // on all platforms.
+    let clean = raw_path
+        .trim_start_matches(".\\")
+        .trim_start_matches("./")
+        .replace('\\', "/");
+    let tex_path = Path::new(&clean);
 
     // Strategy 1: game_dir / full original path (preserves directory structure)
     let full = game_dir.join(tex_path);
@@ -117,9 +122,13 @@ pub fn png_has_alpha(data: &[u8]) -> bool {
 
 /// Extract the file stem (name without extension or directory) from a raw
 /// B3D texture path.  E.g. `"gfx\\monkeyskin.bmp"` → `"monkeyskin"`.
-pub fn texture_stem(raw: &str) -> &str {
-    Path::new(raw.trim_start_matches(".\\").trim_start_matches("./"))
+pub fn texture_stem(raw: &str) -> String {
+    let clean = raw
+        .trim_start_matches(".\\")
+        .trim_start_matches("./")
+        .replace('\\', "/");
+    Path::new(&clean)
         .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }

@@ -88,7 +88,7 @@ pub fn write_gltf_separate(
     fs::write(&bin_path, &bin)?;
 
     // Point the buffer to the external .bin file.
-    let bin_name = bin_path.file_name().unwrap().to_str().unwrap().to_string();
+    let bin_name = bin_path.file_name().unwrap().to_string_lossy().to_string();
     if let Some(bufs) = root.get_mut("buffers").and_then(|v| v.as_array_mut()) {
         if let Some(buf) = bufs.get_mut(0).and_then(|v| v.as_object_mut()) {
             buf.insert("uri".into(), json!(bin_name));
@@ -421,8 +421,11 @@ fn build_materials(
         });
 
         let mut mat_val = if let Some(tex) = tex_ref {
-            let raw = tex.file.trim_start_matches(".\\").trim_start_matches("./");
-            let png_bytes = load_texture(raw, game_dir, tex_cache);
+            let raw = tex.file
+                .trim_start_matches(".\\")
+                .trim_start_matches("./")
+                .replace('\\', "/");
+            let png_bytes = load_texture(&raw, game_dir, tex_cache);
 
             if let Some(bytes) = png_bytes {
                 // Fallback: check actual pixel alpha when B3D flags don't indicate it.

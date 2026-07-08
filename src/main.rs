@@ -82,7 +82,7 @@ fn main() {
     let mut skips = 0u32;
 
     for path in &b3d_files {
-        let stem = path.file_stem().unwrap().to_str().unwrap_or("model");
+        let stem = path.file_stem().unwrap().to_string_lossy().to_string();
         let base_name = if args.glb {
             format!("{stem}.glb")
         } else {
@@ -130,7 +130,7 @@ fn convert_one(
         return Ok(false);
     }
 
-    let model_name = in_path.file_stem().unwrap_or_default().to_str().unwrap_or("model");
+    let model_name = in_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
 
     let mut joints = Vec::new();
     let mut vertex_joint: Vec<Option<(usize, f32)>> = vec![None; vcount];
@@ -147,9 +147,9 @@ fn convert_one(
     let clips = b3d::collect_anims(&b3d_parsed.node);
 
     if glb_mode {
-        writer::write_glb(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, model_name, game_dir, tex_cache, out_path, material_params, color_override)?;
+        writer::write_glb(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, &model_name, game_dir, tex_cache, out_path, material_params, color_override)?;
     } else {
-        writer::write_gltf_separate(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, model_name, game_dir, tex_cache, out_path, material_params, color_override)?;
+        writer::write_gltf_separate(&mesh, &joints, &clips, &b3d_parsed.textures, &b3d_parsed.brushes, &model_name, game_dir, tex_cache, out_path, material_params, color_override)?;
     }
 
     Ok(true)
