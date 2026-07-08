@@ -15,7 +15,7 @@ architecture.
 ## Key constraints
 
 - **Do NOT add new dependencies** unless absolutely necessary. The project
-  deliberately keeps deps minimal (b3d, serde, serde_json, image, walkdir).
+  deliberately keeps deps minimal (serde, serde_json, image, walkdir).
 - **Do NOT reformat the entire codebase** or change style conventions.
 - **Do NOT remove the `pad_to_4` / `pad_to_4_in_place` alignment logic** — glTF
   requires 4-byte alignment for buffer sections.

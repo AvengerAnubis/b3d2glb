@@ -1,3 +1,0 @@
-[submodule "vendor/b3d"]
-	path = vendor/b3d
-	url = git@github.com:AvengerAnubis/b3d.git
