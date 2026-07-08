@@ -81,6 +81,24 @@ pub fn load_texture(raw_path: &str, game_dir: &Path, tex_cache: &Path) -> Option
     Some(bytes)
 }
 
+/// Decode PNG bytes and return `true` if any pixel has alpha < 255.
+///
+/// This is a fallback when B3D metadata doesn't indicate transparency:
+/// we check the actual image data for non-opaque pixels.
+pub fn png_has_alpha(data: &[u8]) -> bool {
+    use image::GenericImageView;
+    let img = match image::load_from_memory(data) {
+        Ok(img) => img,
+        Err(_) => return false,
+    };
+    for (_x, _y, px) in img.pixels() {
+        if px[3] < 255 {
+            return true;
+        }
+    }
+    false
+}
+
 /// Extract the file stem (name without extension or directory) from a raw
 /// B3D texture path.  E.g. `"gfx\\monkeyskin.bmp"` → `"monkeyskin"`.
 pub fn texture_stem(raw: &str) -> &str {

@@ -6,7 +6,7 @@ use crate::b3d::{AnimClip, JointInfo, MeshData, compute_world_matrices};
 use crate::b3d_parser::{Brush, Texture};
 use crate::cli::MaterialParams;
 use crate::math::{mat4_inverse, swap_yz_pos, swap_yz_quat, quat_to_gltf, root_pos, root_quat};
-use crate::texture::load_texture;
+use crate::texture::{load_texture, png_has_alpha};
 
 use serde_json::{json, Value};
 
@@ -399,7 +399,8 @@ fn build_materials(
 
         // Check B3D alpha hints: texture has alpha channel (flags & 2),
         // uses color-key masking (flags & 4), or alpha blend mode (blend == 1).
-        let tex_has_alpha = tex_ref.map_or(false, |t| {
+        // Also check actual pixel data as a fallback (some B3D files omit flags).
+        let mut tex_has_alpha = tex_ref.map_or(false, |t| {
             (t.flags & 2 != 0) || (t.flags & 4 != 0) || t.blend == 1
         });
 
@@ -408,6 +409,10 @@ fn build_materials(
             let png_bytes = load_texture(raw, game_dir, tex_cache);
 
             if let Some(bytes) = png_bytes {
+                // Fallback: check actual pixel alpha when B3D flags don't indicate it.
+                if !tex_has_alpha {
+                    tex_has_alpha = png_has_alpha(&bytes);
+                }
                 let tex_idx = image_infos.len();
                 image_infos.push(ImageInfo { mime: "image/png".into(), data: bytes });
 
@@ -454,6 +459,7 @@ fn build_materials(
     // Fallback: try a texture named after the model.
     if image_infos.is_empty() && !materials.is_empty() {
         if let Some(bytes) = load_texture(model_name, game_dir, tex_cache) {
+            let tex_alpha = png_has_alpha(&bytes);
             let tex_idx = image_infos.len() as u32;
             image_infos.push(ImageInfo { mime: "image/png".into(), data: bytes });
 
@@ -462,6 +468,10 @@ fn build_materials(
                     if let Some(pbr) = obj.get_mut("pbrMetallicRoughness").and_then(|v| v.as_object_mut()) {
                         pbr.insert("baseColorFactor".into(), json!([1.0, 1.0, 1.0, 1.0]));
                         pbr.insert("baseColorTexture".into(), json!({"index": tex_idx}));
+                    }
+                    if tex_alpha {
+                        obj.insert("alphaMode".into(), json!("MASK"));
+                        obj.insert("alphaCutoff".into(), json!(0.5));
                     }
                 }
             }
