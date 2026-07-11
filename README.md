@@ -61,7 +61,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-b3d2glb = { git = "https://github.com/OpenStranded/b3d2glb" }
+b3d2glb = { git = "https://github.com/AvengerAnubis/b3d2glb" }
 ```
 
 ### Quick start — B3D → GLB in memory
